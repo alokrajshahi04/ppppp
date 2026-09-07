@@ -16,9 +16,9 @@ export function LoginPage() {
         setErr(null);
         try {
             await login(email, password);
-            navigate('/dashboard');
+            navigate('/', { replace: true });
         } catch (e) {
-            setErr(e instanceof Error ? e.message : 'login failed');
+            setErr(e instanceof Error ? e.message : 'Sign in failed. Check your credentials.');
         } finally {
             setBusy(false);
         }
@@ -27,15 +27,15 @@ export function LoginPage() {
     return (
         <div className="login-screen">
             <form className="login-card" onSubmit={onSubmit}>
-                <div className="row" style={{ alignItems: 'center', marginBottom: 'var(--s-5)' }}>
-                    <span style={{
-                        display: 'inline-block', width: 14, height: 14,
-                        background: 'var(--accent)', borderRadius: 2, marginRight: 8,
-                    }} />
-                    <strong style={{ letterSpacing: '0.04em' }}>TOLTI AI</strong>
+                <div className="row" style={{ gap: 10, marginBottom: 'var(--s-6)' }}>
+                    <span className="logo" style={{
+                        width: 24, height: 24, borderRadius: 6, background: 'var(--accent)',
+                        color: '#0B0B0B', display: 'grid', placeItems: 'center', fontWeight: 800, fontSize: 14,
+                    }}>t</span>
+                    <strong style={{ letterSpacing: '0.06em', fontSize: 'var(--fz-h3)' }}>TOLTI AI</strong>
                 </div>
                 <div className="login-title">Sign in</div>
-                <div className="login-sub">Sovereign, on-premise, air-gapped workbench.</div>
+                <div className="login-sub">Sovereign, on-premise, air-gapped workspace. No data leaves this network.</div>
                 {err && <div className="banner banner-error">{err}</div>}
                 <div className="field">
                     <label className="field-label">Email</label>
@@ -45,12 +45,12 @@ export function LoginPage() {
                     <label className="field-label">Password</label>
                     <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
                 </div>
-                <button className="btn btn-primary" type="submit" disabled={busy} style={{ width: '100%', marginTop: 8 }}>
+                <button className="btn btn-accent" type="submit" disabled={busy} style={{ width: '100%', marginTop: 6, minHeight: 38 }}>
                     {busy ? <span className="spinner" /> : 'Sign in'}
                 </button>
-                <div style={{ marginTop: 'var(--s-5)', fontSize: 'var(--fz-tiny)', color: 'var(--ink-3)' }}>
-                    Seeded users: admin@tolti.ai · driver@tolti.ai · reviewer@tolti.ai · watcher@tolti.ai · security@tolti.ai
-                    <br />Password for all: <span className="mono">admin</span>
+                <div style={{ marginTop: 'var(--s-5)', fontSize: 'var(--fz-tiny)', color: 'var(--ink-3)', lineHeight: 1.6 }}>
+                    Seeded users: admin · driver · reviewer · watcher · security @tolti.ai<br />
+                    Password for all: <span className="mono">admin</span> — change before any real deployment.
                 </div>
             </form>
         </div>

@@ -8,7 +8,7 @@ import {
 import { asUser, forbidden, notFound } from '../utils/errors.js';
 import { parseBody, parseQuery } from '../utils/validation.js';
 import { getTask } from '../tasks/repo.js';
-import { isMember } from '../workspaces/repo.js';
+import { requireTaskAccess } from '../tasks/access.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 import { audit } from '../governance/audit.js';
 import type { UserRole } from '@tolti/contracts';
@@ -44,9 +44,7 @@ export async function approvalRoutes(app: any): Promise<void> {
     app.post('/api/v1/approvals', async (req: any, reply: any) => {
         const u = asUser(req);
         const body = parseBody(CreateSchema, req.body);
-        const task = await getTask(body.task_id);
-        if (!task) throw notFound();
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(body.task_id, u);
         const created = await createApproval({
             task_id: body.task_id,
             requested_by: u.sub,
@@ -79,8 +77,7 @@ export async function approvalRoutes(app: any): Promise<void> {
         const body = parseBody(DecideSchema, req.body);
         const approval = await getApproval(id);
         if (!approval) throw notFound();
-        const task = await getTask(approval.task_id);
-        if (!task || !(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(approval.task_id, u);
         const roles = u.system_roles as UserRole[];
         if (!roles.includes('SECURITY_APPROVER') && !roles.includes('ADMIN')) {
             throw forbidden('security approver or admin only');

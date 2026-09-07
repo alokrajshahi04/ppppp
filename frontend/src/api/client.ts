@@ -1,18 +1,29 @@
 import type { ApiError } from '@tolti/contracts';
 
-const BASE = ''; // vite proxy handles /api and /ws
+const BASE = ''; // vite dev proxy / nginx handle /api and /ws
 
 let accessToken: string | null = null;
-const listeners = new Set<(t: string | null) => void>();
+const tokenListeners = new Set<(t: string | null) => void>();
 
 export function setAccessToken(token: string | null) {
     accessToken = token;
-    for (const l of listeners) l(token);
+    for (const l of tokenListeners) l(token);
 }
 export function getAccessToken(): string | null { return accessToken; }
-export function onTokenChange(fn: (t: string | null) => void): () => void {
-    listeners.add(fn);
-    return () => listeners.delete(fn);
+
+// Registered by the auth store — lets the client recover from expired
+// access tokens without a circular import. Single-flight, retry once.
+let refreshHandler: (() => Promise<boolean>) | null = null;
+let refreshInFlight: Promise<boolean> | null = null;
+
+export function setRefreshHandler(fn: () => Promise<boolean>) {
+    refreshHandler = fn;
+}
+
+async function tryRefresh(): Promise<boolean> {
+    if (!refreshHandler) return false;
+    refreshInFlight ??= refreshHandler().finally(() => { refreshInFlight = null; });
+    return refreshInFlight;
 }
 
 export class ApiException extends Error {
@@ -24,9 +35,10 @@ export class ApiException extends Error {
 
 interface ReqInit extends RequestInit {
     json?: unknown;
+    _retried?: boolean;
 }
 
-async function request<T>(path: string, init: ReqInit = {}): Promise<T> {
+async function raw(path: string, init: ReqInit): Promise<Response> {
     const headers = new Headers(init.headers);
     if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
     let body = init.body;
@@ -34,7 +46,21 @@ async function request<T>(path: string, init: ReqInit = {}): Promise<T> {
         headers.set('Content-Type', 'application/json');
         body = JSON.stringify(init.json);
     }
-    const res = await fetch(`${BASE}${path}`, { ...init, headers, body });
+    return fetch(`${BASE}${path}`, { ...init, headers, body });
+}
+
+async function request<T>(path: string, init: ReqInit = {}): Promise<T> {
+    const authEndpoint = path.startsWith('/api/v1/auth/login') || path.startsWith('/api/v1/auth/refresh');
+    let res = await raw(path, init);
+
+    // Expired access token → refresh once, then retry the original request.
+    if (res.status === 401 && !authEndpoint && !init._retried) {
+        const ok = await tryRefresh();
+        if (ok) {
+            res = await raw(path, { ...init, _retried: true });
+        }
+    }
+
     if (res.status === 204) return undefined as T;
     const ct = res.headers.get('content-type') ?? '';
     const data: unknown = ct.includes('application/json') ? await res.json() : await res.text();
@@ -49,4 +75,7 @@ export const api = {
     post: <T,>(path: string, json?: unknown) => request<T>(path, { method: 'POST', json }),
     patch: <T,>(path: string, json?: unknown) => request<T>(path, { method: 'PATCH', json }),
     del: <T,>(path: string) => request<T>(path, { method: 'DELETE' }),
+    // For presigned uploads/downloads — never add auth headers or JSON content-type.
+    putRaw: (url: string, body: Blob | File, contentType: string) =>
+        fetch(url, { method: 'PUT', body, headers: { 'Content-Type': contentType } }),
 };

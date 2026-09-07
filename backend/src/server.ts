@@ -58,11 +58,15 @@ export async function buildServer() {
                 details: err.details ?? null,
             });
         }
-        if (err && typeof err === 'object' && 'validation' in err && err.validation) {
-            return reply.status(400).send({
-                code: 'BAD_REQUEST',
-                message: 'validation failed',
-                details: err.validation,
+        // Framework errors (validation, body parsing, 404s…) carry their own
+        // statusCode — respect it instead of masking them as 500.
+        if (err && typeof err === 'object' && typeof err.statusCode === 'number' && err.statusCode >= 400) {
+            const status = err.statusCode;
+            if (status >= 500) req.log.error(err);
+            return reply.status(status).send({
+                code: status >= 500 ? 'INTERNAL' : 'BAD_REQUEST',
+                message: err.message ?? 'request failed',
+                details: err.validation ?? null,
             });
         }
         req.log.error(err);

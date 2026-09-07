@@ -1,5 +1,6 @@
 import type { FastifyRequest } from 'fastify';
-import { listEvidence, getTask } from '../tasks/repo.js';
+import { listEvidence } from '../tasks/repo.js';
+import { requireTaskAccess } from '../tasks/access.js';
 import { listMessages } from '../messages/repo.js';
 import { findUserById } from '../users/repo.js';
 import { getTaskPresence, setPresence } from './presence.js';
@@ -35,7 +36,12 @@ export async function websocketRoutes(app: any): Promise<void> {
             return socket.close();
         }
 
-        const task = await getTask(taskId);
+        let task;
+        try {
+            task = await requireTaskAccess(taskId, { sub: payload.sub, system_roles: payload.system_roles });
+        } catch {
+            task = null;
+        }
         if (!task) {
             socket.send(JSON.stringify({ type: 'error', payload: { code: 'NOT_FOUND', message: 'task not found' } }));
             return socket.close();

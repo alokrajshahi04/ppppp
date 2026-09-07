@@ -3,7 +3,7 @@ import { createMessage, listMessages } from './repo.js';
 import { asUser, forbidden, notFound } from '../utils/errors.js';
 import { parseBody } from '../utils/validation.js';
 import { getTask } from '../tasks/repo.js';
-import { isMember } from '../workspaces/repo.js';
+import { requireTaskAccess } from '../tasks/access.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 
 const PostSchema = z.object({
@@ -24,9 +24,7 @@ export async function messageRoutes(app: any): Promise<void> {
     app.get('/api/v1/tasks/:id/messages', async (req: any) => {
         const { id } = req.params as { id: string };
         const u = asUser(req);
-        const task = await getTask(id);
-        if (!task) throw notFound();
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(id, u);
         const q = parseBody(ListQuerySchema, req.query ?? {}) as z.infer<typeof ListQuerySchema>;
         return listMessages(id, q.limit ?? 200, q.before);
     });
@@ -34,9 +32,7 @@ export async function messageRoutes(app: any): Promise<void> {
     app.post('/api/v1/tasks/:id/messages', async (req: any) => {
         const { id } = req.params as { id: string };
         const u = asUser(req);
-        const task = await getTask(id);
-        if (!task) throw notFound();
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(id, u);
         const body = parseBody(PostSchema, req.body);
         const msg = await createMessage({
             task_id: id,

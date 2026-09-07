@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { AuthSession, User } from '@tolti/contracts';
-import { api, getAccessToken, onTokenChange, setAccessToken } from '../api/client';
+import type { AuthSession, User, Workspace } from '@tolti/contracts';
+import { api, getAccessToken, setAccessToken, setRefreshHandler } from '../api/client';
 
 interface AuthState {
     user: User | null;
@@ -29,11 +29,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         setAccessToken(accessToken);
-        const off = onTokenChange(() => undefined);
-        return off;
     }, [accessToken]);
 
-    // Try to validate session once at boot.
+    // Let the API client recover from 401s via single-flight refresh.
+    useEffect(() => {
+        setRefreshHandler(async () => {
+            if (!refreshToken) return false;
+            try {
+                const r = await api.post<{ access_token: string }>('/api/v1/auth/refresh', { refresh_token: refreshToken });
+                _setAccessToken(r.access_token);
+                localStorage.setItem(ACCESS_KEY, r.access_token);
+                setAccessToken(r.access_token);
+                return true;
+            } catch {
+                return false;
+            }
+        });
+    }, [refreshToken]);
+
+    // Validate session once at boot (client auto-refreshes on 401).
     useEffect(() => {
         (async () => {
             if (!accessToken) {
@@ -45,8 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setUser(me);
                 localStorage.setItem(USER_KEY, JSON.stringify(me));
             } catch {
-                const ok = await refresh();
-                if (!ok) clear();
+                clear();
             } finally {
                 setLoading(false);
             }
@@ -62,7 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.removeItem(REFRESH_KEY);
         localStorage.removeItem(USER_KEY);
         setAccessToken(null);
-    }
+     }
 
     async function login(email: string, password: string) {
         const session = await api.post<AuthSession>('/api/v1/auth/login', { email, password });
@@ -116,4 +129,33 @@ export function useAuth(): AuthState {
 export function hasRole(roles: string[] | undefined, ...want: string[]): boolean {
     if (!roles) return false;
     return roles.includes('ADMIN') || want.some((r) => roles.includes(r));
+}
+
+export function initialsOf(name: string | undefined | null): string {
+    if (!name) return '··';
+    const parts = name.trim().split(/\s+/);
+    const a = parts[0]?.[0] ?? '';
+    const b = parts.length > 1 ? parts[parts.length - 1]![0] : '';
+    return (a + b).toUpperCase() || '··';
+}
+
+// ── Active workspace (shared via localStorage) ───────────────────
+const WS_KEY = 'tolti.ws';
+
+export function getActiveWorkspaceId(): string | null {
+    return localStorage.getItem(WS_KEY);
+}
+export function setActiveWorkspaceId(id: string) {
+    localStorage.setItem(WS_KEY, id);
+}
+
+export async function loadWorkspaces(): Promise<Workspace[]> {
+    const list = await api.get<Workspace[]>('/api/v1/workspaces');
+    const stored = getActiveWorkspaceId();
+    if (list.length && (!stored || !list.some((w) => w.id === stored))) {
+        // Land in the seeded default workspace when present, else the first.
+        const fallback = list.find((w) => w.slug === 'default') ?? list[0]!;
+        setActiveWorkspaceId(fallback.id);
+    }
+    return list;
 }

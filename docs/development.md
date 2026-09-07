@@ -39,6 +39,9 @@ The Postgres schema and seed auto-apply **only on first boot of an empty volume*
 5. **Seed hash.** `postgres/init/03-seed.sql` contains a real bcrypt hash of `admin`. If login fails on an old volume, the volume predates the fix — wipe it.
 6. **Non-UUID params.** `getTask`/`getEvidence` guard against non-UUID ids (Postgres would throw 500 instead of 404). Keep that pattern for new `:id` routes.
 7. **AI engine port.** Host mapping is 18000 (8000 was taken by an unrelated local service); internal port stays 8000.
+8. **`/health` must be proxied.** The frontend polls `/health` on its own origin. nginx (`location = /health`) and the Vite dev proxy both forward it to the backend — without this, the SPA fallback serves HTML, the client stores it as "health", and `.services` reads crash the whole tree. Any new frontend-origin fetch of a backend route needs the same treatment.
+9. **Optional chaining chains.** `a?.b.c` still throws when `a` is a truthy non-object (e.g. a string). Guard `b` too (`a?.b?.c`) whenever the shape isn't guaranteed by a validator.
+10. **Playwright strict mode.** Buttons with identical labels exist in the rail and page headers (by design). Target with scoped selectors (`.rail-new`, `.modal …`) in tests.
 
 ## Testing
 
@@ -55,3 +58,5 @@ The Postgres schema and seed auto-apply **only on first boot of an empty volume*
 | Duplicate `/v1/retrieve` router removed from AI engine | `evidence.router` already serves it; FastAPI first-registration masked the dupe |
 | `MINIO_PUBLIC_ENDPOINT` split from `MINIO_ENDPOINT` | Presigned URLs must name a browser-reachable host |
 | `listTasks` search filter rewritten with explicit param indices | `?` placeholder only replaced once, corrupting the query |
+| `/health` proxied in nginx + Vite | Frontend status bar was receiving the SPA fallback and crashing on `.services` |
+| Room `kind` (SHARED/PRIVATE) added server-side | Sidebar offers both chat types; privacy enforced in list/get queries, not just UI |

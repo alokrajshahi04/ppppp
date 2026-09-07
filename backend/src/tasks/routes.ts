@@ -1,5 +1,6 @@
 import { v4 as uuid } from 'uuid';
 import { z } from 'zod';
+import type { Task } from '@tolti/contracts';
 import {
     createEvidenceRecord,
     createTask,
@@ -16,6 +17,10 @@ import {
 import { asUser, badRequest, forbidden, notFound } from '../utils/errors.js';
 import { parseBody, parseQuery } from '../utils/validation.js';
 import { isMember } from '../workspaces/repo.js';
+import { requireTaskAccess } from './access.js';
+import { isTaskMember, listTaskMembers, addTaskMember, removeTaskMember } from './repo.js';
+import { query } from '../db/pool.js';
+import { notify } from '../governance/repo.js';
 import { presignedGetUrl, presignedPutUrl, ensureBucket, deleteObject, putObject } from '../evidence/storage.js';
 import { indexEvidence, ocr as aiOcr } from '../ai/client.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
@@ -41,6 +46,7 @@ const CreateTaskSchema = z.object({
     title: z.string().min(1),
     description: z.string().optional(),
     priority: TaskPriorityEnum.optional(),
+    kind: z.enum(['SHARED', 'PRIVATE']).optional(),
 });
 
 const UpdateTaskSchema = z.object({
@@ -76,6 +82,16 @@ const EvidenceUploadSchema = z.object({
     metadata: z.record(z.unknown()).optional(),
 });
 
+/** Room driver or a workspace ADMIN may manage room members. */
+async function canManageMembers(task: Task, u: { sub: string; system_roles: string[] }): Promise<boolean> {
+    if (task.driver_id === u.sub || u.system_roles.includes('ADMIN')) return true;
+    const { rowCount } = await query(
+        `SELECT 1 FROM workspace_members WHERE workspace_id = $1 AND user_id = $2 AND role = 'ADMIN'`,
+        [task.workspace_id, u.sub],
+    );
+    return (rowCount ?? 0) > 0;
+}
+
 export async function taskRoutes(app: any): Promise<void> {
     app.addHook('preHandler', app.authenticate);
 
@@ -86,7 +102,8 @@ export async function taskRoutes(app: any): Promise<void> {
         if (filters.workspace_id) {
             if (!(await isMember(filters.workspace_id, u.sub))) throw forbidden();
         }
-        return listTasks(filters);
+        const isAdmin = (u.system_roles as UserRole[]).includes('ADMIN');
+        return listTasks(filters, { sub: u.sub, isAdmin });
     });
 
     app.post('/api/v1/tasks', async (req: any, reply: any) => {
@@ -98,6 +115,7 @@ export async function taskRoutes(app: any): Promise<void> {
             title: body.title,
             description: body.description ?? null,
             priority: body.priority ?? 'MEDIUM',
+            kind: body.kind ?? 'SHARED',
             driver_id: u.sub,
         });
         audit({ actor_id: u.sub, event: 'TASK_CREATED', task_id: task.id, workspace_id: task.workspace_id });
@@ -108,18 +126,13 @@ export async function taskRoutes(app: any): Promise<void> {
     app.get('/api/v1/tasks/:id', async (req: any) => {
         const { id } = req.params as { id: string };
         const u = asUser(req);
-        const task = await getTask(id);
-        if (!task) throw notFound('task not found');
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
-        return task;
+        return requireTaskAccess(id, u);
     });
 
     app.patch('/api/v1/tasks/:id', async (req: any) => {
         const { id } = req.params as { id: string };
         const u = asUser(req);
-        const task = await getTask(id);
-        if (!task) throw notFound();
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(id, u);
         const body = parseBody(UpdateTaskSchema, req.body);
         const updated = await updateTask(id, body);
         audit({ actor_id: u.sub, event: 'TASK_UPDATED', task_id: id, workspace_id: task.workspace_id });
@@ -130,8 +143,7 @@ export async function taskRoutes(app: any): Promise<void> {
     app.delete('/api/v1/tasks/:id', async (req: any) => {
         const { id } = req.params as { id: string };
         const u = asUser(req);
-        const task = await getTask(id);
-        if (!task) throw notFound();
+        const task = await requireTaskAccess(id, u);
         const roles = u.system_roles as UserRole[];
         if (!(roles.includes('ADMIN') || task.driver_id === u.sub)) throw forbidden();
         await updateTask(id, { status: 'ARCHIVED' });
@@ -143,10 +155,9 @@ export async function taskRoutes(app: any): Promise<void> {
         const { id } = req.params as { id: string };
         const u = asUser(req);
         const body = parseBody(HandOffSchema, req.body);
-        const task = await getTask(id);
-        if (!task) throw notFound();
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(id, u);
         const updated = await handOff(id, body.to_user_id);
+        await addTaskMember({ task_id: id, user_id: body.to_user_id, added_by: u.sub });
         audit({
             actor_id: u.sub,
             event: 'TASK_HANDED_OFF',
@@ -159,23 +170,87 @@ export async function taskRoutes(app: any): Promise<void> {
         return updated;
     });
 
+    // ── Room members (invites) ────────────────────────────────
+    // Only the room driver or a workspace ADMIN may manage members.
+    // Invitees must already be workspace members ("already added users").
+    app.get('/api/v1/tasks/:id/members', async (req: any) => {
+        const { id } = req.params as { id: string };
+        const u = asUser(req);
+        await requireTaskAccess(id, u);
+        return listTaskMembers(id);
+    });
+
+    app.post('/api/v1/tasks/:id/members', async (req: any) => {
+        const { id } = req.params as { id: string };
+        const u = asUser(req);
+        const task = await requireTaskAccess(id, u);
+        if (!(await canManageMembers(task, u))) {
+            throw forbidden('only the room driver or a workspace admin can invite');
+        }
+        const body = parseBody(z.object({ user_id: z.string().uuid() }), req.body);
+        if (!(await isMember(task.workspace_id, body.user_id))) {
+            throw badRequest('that user is not a member of this workspace');
+        }
+        const added = await addTaskMember({ task_id: id, user_id: body.user_id, added_by: u.sub });
+        if (added) {
+            await notify({
+                user_id: body.user_id,
+                workspace_id: task.workspace_id,
+                task_id: id,
+                kind: 'ROOM_INVITE',
+                title: `You were added to “${task.title}”`,
+                body: `${u.email} invited you to this shared room.`,
+            });
+            audit({
+                actor_id: u.sub,
+                event: 'MEMBER_ADDED',
+                task_id: id,
+                workspace_id: task.workspace_id,
+                target_id: body.user_id,
+            });
+            broadcastTaskEvent(id, {
+                type: 'activity',
+                payload: { event: 'member_added', actor_id: u.sub, target_id: body.user_id, summary: 'A teammate was added to the room' },
+            });
+        }
+        return { ok: true, added };
+    });
+
+    app.delete('/api/v1/tasks/:id/members/:userId', async (req: any) => {
+        const { id, userId } = req.params as { id: string; userId: string };
+        const u = asUser(req);
+        const task = await requireTaskAccess(id, u);
+        if (!(await canManageMembers(task, u))) {
+            throw forbidden('only the room driver or a workspace admin can remove members');
+        }
+        if (userId === task.driver_id) throw badRequest('the driver cannot be removed from their own room');
+        await removeTaskMember(id, userId);
+        audit({
+            actor_id: u.sub,
+            event: 'MEMBER_REMOVED',
+            task_id: id,
+            workspace_id: task.workspace_id,
+            target_id: userId,
+        });
+        broadcastTaskEvent(id, {
+            type: 'activity',
+            payload: { event: 'member_removed', actor_id: u.sub, target_id: userId, summary: 'A member was removed from the room' },
+        });
+        return { ok: true };
+    });
+
     // ── Evidence ─────────────────────────────────────────────
     app.get('/api/v1/tasks/:id/evidence', async (req: any) => {
         const { id } = req.params as { id: string };
         const u = asUser(req);
-        const task = await getTask(id);
-        if (!task) throw notFound();
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(id, u);
         return listEvidence(id);
     });
 
     app.post('/api/v1/tasks/:id/evidence', async (req: any, reply: any) => {
         const { id: taskId } = req.params as { id: string };
         const u = asUser(req);
-        const task = await getTask(taskId);
-        if (!task) throw notFound();
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
-
+        const task = await requireTaskAccess(taskId, u);
         const body = parseBody(EvidenceUploadSchema, req.body);
 
         await ensureBucket();
@@ -217,8 +292,7 @@ export async function evidenceRoutes(app: any): Promise<void> {
         const u = asUser(req);
         const evidence = await getEvidence(id);
         if (!evidence) throw notFound();
-        const task = await getTask(evidence.task_id);
-        if (!task || !(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(evidence.task_id, u);
         return evidence;
     });
 
@@ -227,8 +301,7 @@ export async function evidenceRoutes(app: any): Promise<void> {
         const u = asUser(req);
         const evidence = await getEvidence(id);
         if (!evidence) throw notFound();
-        const task = await getTask(evidence.task_id);
-        if (!task || !(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(evidence.task_id, u);
         const url = await presignedGetUrl(evidence.storage_key);
         return { url };
     });
@@ -238,8 +311,7 @@ export async function evidenceRoutes(app: any): Promise<void> {
         const u = asUser(req);
         const evidence = await getEvidence(id);
         if (!evidence) throw notFound();
-        const task = await getTask(evidence.task_id);
-        if (!task) throw notFound();
+        const task = await requireTaskAccess(evidence.task_id, u);
         const roles = u.system_roles as UserRole[];
         if (!(roles.includes('ADMIN') || evidence.uploaded_by === u.sub)) throw forbidden();
         try {

@@ -4,7 +4,10 @@ import type {
     EvidenceKind,
     AuditInfo,
     UUID,
+    ISO8601,
 } from './common.js';
+
+export type TaskKind = 'SHARED' | 'PRIVATE';
 
 export interface Task extends AuditInfo {
     id: UUID;
@@ -13,6 +16,7 @@ export interface Task extends AuditInfo {
     description: string | null;
     status: TaskStatus;
     priority: TaskPriority;
+    kind: TaskKind;
     driver_id: UUID;
     handed_off_to: UUID | null;
     parent_task_id: UUID | null;
@@ -26,6 +30,7 @@ export interface CreateTaskRequest {
     title: string;
     description?: string;
     priority?: TaskPriority;
+    kind?: TaskKind;
 }
 
 export interface UpdateTaskRequest {
@@ -48,6 +53,14 @@ export interface TaskFilters {
     q?: string;
     page?: number;
     page_size?: number;
+}
+
+export interface TaskMember {
+    user_id: UUID;
+    display_name: string;
+    email: string;
+    is_driver: boolean;
+    added_at: ISO8601;
 }
 
 export interface Evidence {

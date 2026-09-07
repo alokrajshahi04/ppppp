@@ -13,12 +13,12 @@ SIH26117 · Smart Automation · Doc v1.0
 |---|---|---|
 | 1 | Foundation — infra, DB schema, contracts, AI engine scaffold | ✅ complete |
 | 2 | Backend — auth, RBAC, tasks, evidence, WS rooms, approvals, audit | ✅ complete |
-| 3 | Frontend — all screens, live collaboration, admin panels | ✅ complete |
-| 4 | Integration — **45/45 automated E2E checks green** | ✅ complete |
+| 3 | Frontend — workspace UI (rail, rooms with Chat/Documents/Code/Agent tabs, private + shared chats) | ✅ complete |
+| 4 | Integration — **45/45 API checks green** · **full UI navigation pass clean** (no console errors, no 5xx) | ✅ complete |
 | 5 | Model wiring (Ollama / vLLM endpoints) | ⏳ next |
 | 6 | Deployment hardening (TLS, multi-node WS fanout, backups) | ⏳ |
 
-**The full product loop works today**: login → workspace → task → evidence upload (MinIO) → message → AI run (routes through the Agent Router; fails gracefully until a model endpoint is wired) → approval → audit trail. What is *not* wired yet is a real LLM endpoint — every model call returns a clean `FAILED` run instead of text.
+**The full product loop works today**: sign in → pick a room (shared or private) → attach evidence (MinIO) → message the team → "Review & run" an AI request (routes through the Agent Router; fails gracefully into actionable error cards until a model endpoint is wired) → request approval → security sign-off → full audit trail. What is *not* wired yet is a real LLM endpoint — every model call returns a clean, retryable `FAILED` state instead of text.
 
 ---
 

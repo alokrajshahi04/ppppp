@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { asUser, forbidden, notFound } from '../utils/errors.js';
 import { parseBody } from '../utils/validation.js';
 import { getTask } from '../tasks/repo.js';
-import { isMember } from '../workspaces/repo.js';
+import { requireTaskAccess } from '../tasks/access.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 import { audit } from '../governance/audit.js';
 import { code, reason, retrieve, route, vision } from './client.js';
@@ -34,18 +34,14 @@ export async function aiRoutes(app: any): Promise<void> {
     app.get('/api/v1/tasks/:id/ai/runs', async (req: any) => {
         const { id } = req.params as { id: string };
         const u = asUser(req);
-        const task = await getTask(id);
-        if (!task) throw notFound();
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(id, u);
         return listRuns(id);
     });
 
     app.post('/api/v1/tasks/:id/ai/runs', async (req: any, reply: any) => {
         const { id: taskId } = req.params as { id: string };
         const u = asUser(req);
-        const task = await getTask(taskId);
-        if (!task) throw notFound();
-        if (!(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(taskId, u);
         const body = parseBody(StartSchema, req.body);
 
         // Optional: index any newly referenced evidence so RAG has up-to-date chunks.
@@ -108,8 +104,7 @@ export async function aiRoutes(app: any): Promise<void> {
         const u = asUser(req);
         const run = await getRun(id);
         if (!run) throw notFound();
-        const task = await getTask(run.task_id);
-        if (!task || !(await isMember(task.workspace_id, u.sub))) throw forbidden();
+        const task = await requireTaskAccess(run.task_id, u);
         const citations = await listCitationsForRun(id);
         return { ...run, citations };
     });

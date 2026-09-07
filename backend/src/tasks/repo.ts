@@ -18,7 +18,15 @@ export interface TaskFilters {
     page_size?: number;
 }
 
-export async function listTasks(f: TaskFilters): Promise<{ items: Task[]; total: number }> {
+export interface CallerContext {
+    sub: string;
+    isAdmin: boolean;
+}
+
+export async function listTasks(
+    f: TaskFilters,
+    caller: CallerContext,
+): Promise<{ items: Task[]; total: number }> {
     const where: string[] = [];
     const params: unknown[] = [];
     const push = (clause: string, value: unknown) => {
@@ -34,6 +42,26 @@ export async function listTasks(f: TaskFilters): Promise<{ items: Task[]; total:
         const a = params.length - 1;
         const b = params.length;
         where.push(`(t.title ILIKE $${a} OR t.description ILIKE $${b})`);
+    }
+
+    // Visibility model:
+    //  - system ADMIN sees everything (audit mandate)
+    //  - PRIVATE rooms: driver only
+    //  - SHARED rooms: any workspace member who is the driver OR has been
+    //    invited (task_members); workspace membership is the outer boundary.
+    if (!caller.isAdmin) {
+        params.push(caller.sub);
+        const me = params.length;
+        where.push(`(
+            t.workspace_id IN (SELECT workspace_id FROM workspace_members WHERE user_id = $${me})
+            AND (
+                (t.kind = 'PRIVATE' AND t.driver_id = $${me})
+                OR (t.kind = 'SHARED' AND (
+                    t.driver_id = $${me}
+                    OR EXISTS (SELECT 1 FROM task_members tm WHERE tm.task_id = t.id AND tm.user_id = $${me})
+                ))
+            )
+        )`);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -81,12 +109,13 @@ export async function createTask(input: {
     title: string;
     description: string | null;
     priority: TaskPriority;
+    kind: Task['kind'];
     driver_id: string;
 }): Promise<Task> {
     const { rows } = await query<Task>(
-        `INSERT INTO tasks (workspace_id, title, description, priority, driver_id, status)
-         VALUES ($1, $2, $3, $4::task_priority, $5, 'OPEN') RETURNING *`,
-        [input.workspace_id, input.title, input.description, input.priority, input.driver_id],
+        `INSERT INTO tasks (workspace_id, title, description, priority, kind, driver_id, status)
+         VALUES ($1, $2, $3, $4::task_priority, $5::task_kind, $6, 'OPEN') RETURNING *`,
+        [input.workspace_id, input.title, input.description, input.priority, input.kind, input.driver_id],
     );
     return rows[0]!;
 }
@@ -180,4 +209,60 @@ export async function setEvidenceOcrText(id: string, text: string): Promise<void
         `UPDATE evidence SET ocr_text = $2, ocr_completed = TRUE WHERE id = $1`,
         [id, text],
     );
+}
+
+// ── Room (task) membership ───────────────────────────────────────
+
+export interface TaskMemberRow {
+    user_id: string;
+    display_name: string;
+    email: string;
+    is_driver: boolean;
+    added_at: string;
+}
+
+export async function isTaskMember(taskId: string, userId: string): Promise<boolean> {
+    const { rows } = await query<{ exists: boolean }>(
+        `SELECT EXISTS(SELECT 1 FROM task_members WHERE task_id = $1 AND user_id = $2) AS exists`,
+        [taskId, userId],
+    );
+    return !!rows[0]?.exists;
+}
+
+export async function listTaskMembers(taskId: string): Promise<TaskMemberRow[]> {
+    const { rows } = await query<TaskMemberRow>(
+        `SELECT u.id AS user_id, u.display_name, u.email, (u.id = t.driver_id) AS is_driver,
+                COALESCE(tm.added_at, t.created_at) AS added_at
+           FROM tasks t
+           JOIN users u ON u.id = t.driver_id
+           LEFT JOIN task_members tm ON tm.task_id = t.id AND tm.user_id = u.id
+          WHERE t.id = $1
+          UNION
+         SELECT u.id, u.display_name, u.email, FALSE, tm.added_at
+           FROM task_members tm
+           JOIN users u ON u.id = tm.user_id
+           JOIN tasks t ON t.id = tm.task_id
+          WHERE tm.task_id = $1
+          ORDER BY is_driver DESC, added_at ASC`,
+        [taskId],
+    );
+    return rows;
+}
+
+export async function addTaskMember(input: {
+    task_id: string;
+    user_id: string;
+    added_by: string;
+}): Promise<boolean> {
+    const { rowCount } = await query(
+        `INSERT INTO task_members (task_id, user_id, added_by)
+         VALUES ($1, $2, $3)
+         ON CONFLICT DO NOTHING`,
+        [input.task_id, input.user_id, input.added_by],
+    );
+    return (rowCount ?? 0) > 0;
+}
+
+export async function removeTaskMember(taskId: string, userId: string): Promise<void> {
+    await query(`DELETE FROM task_members WHERE task_id = $1 AND user_id = $2`, [taskId, userId]);
 }

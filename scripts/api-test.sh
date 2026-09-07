@@ -26,14 +26,14 @@ check() { # name, expected, actual
 req() { # method, path, [json-body], [extra curl args...]
     local method="$1" path="$2" body="${3:-}"
     shift 3 2>/dev/null || shift $#
+    local ct=()
     if [[ -n "$body" ]]; then
+        ct=(-H 'Content-Type: application/json')
         curl -s -w '\n%{http_code}' -X "$method" "$BASE$path" \
-            -H 'Content-Type: application/json' \
-            ${TOKEN:+-H "Authorization: Bearer $TOKEN"} \
-            -d "$body" "$@"
+            -H "Authorization: Bearer ${TOKEN:-}" \
+            "${ct[@]}" -d "$body" "$@"
     else
         curl -s -w '\n%{http_code}' -X "$method" "$BASE$path" \
-            -H 'Content-Type: application/json' \
             ${TOKEN:+-H "Authorization: Bearer $TOKEN"} \
             "$@"
     fi
@@ -87,12 +87,10 @@ TOKEN=""
 R=$(req POST /api/v1/auth/login '{"email":"admin@tolti.ai","password":"admin"}'); TOKEN=$(body_of "$R" | jq -r .access_token)
 R=$(req GET /api/v1/workspaces)
 expect_code "list workspaces" 200 "$R"
-WS_ID=$(body_of "$R" | jq -r '.[0].id')
-check "default workspace exists" "yes" "$([[ -n "$WS_ID" && "$WS_ID" != "null" ]] && echo yes || echo no)"
-
-R=$(req POST /api/v1/workspaces "{\"name\":\"E2E Test WS\",\"slug\":\"e2e-test-$(date +%s)\",\"description\":\"created by api-test\"}")
-expect_code "create workspace" 201 "$R"
-WS2=$(body_of "$R" | jq -r .id)
+# Use the seeded Default Workspace for everything — the suite must not
+# litter the demo DB with extra workspaces (seed already members all roles).
+WS2=$(body_of "$R" | jq -r '.[] | select(.slug=="default") | .id')
+check "default workspace exists" "yes" "$([[ -n "$WS2" && "$WS2" != "null" ]] && echo yes || echo no)"
 
 R=$(req GET "/api/v1/workspaces/$WS2/members")
 expect_code "list members" 200 "$R"
@@ -105,7 +103,8 @@ expect_code "add security approver to workspace" 200 "$R"
 
 # ═════════════════════════════════════════════════════════════
 section "4 · Tasks"
-R=$(req POST /api/v1/tasks "{\"workspace_id\":\"$WS2\",\"title\":\"Pump 7 vibration anomaly\",\"description\":\"Investigate repeated bearing failures on line 7\",\"priority\":\"HIGH\"}")
+RUN_TAG="e2e-$(date +%s)"
+R=$(req POST /api/v1/tasks "{\"workspace_id\":\"$WS2\",\"title\":\"$RUN_TAG pump anomaly\",\"description\":\"Investigate repeated bearing failures on line 7\",\"priority\":\"HIGH\"}")
 expect_code "create task" 201 "$R"
 TASK_ID=$(body_of "$R" | jq -r .id)
 
@@ -116,11 +115,59 @@ R=$(req PATCH "/api/v1/tasks/$TASK_ID" '{"status":"IN_PROGRESS"}')
 expect_code "update task status" 200 "$R"
 check "status applied" "IN_PROGRESS" "$(body_of "$R" | jq -r .status)"
 
-R=$(req GET "/api/v1/tasks?workspace_id=$WS2&q=bearing")
-check "search q=bearing finds 1" 1 "$(body_of "$R" | jq '.total')"
+R=$(req GET "/api/v1/tasks?workspace_id=$WS2&q=$RUN_TAG")
+check "search by unique tag finds 1" 1 "$(body_of "$R" | jq '.total')"
 
 R=$(req POST "/api/v1/tasks/$TASK_ID/handoff" '{"to_user_id":"00000000-0000-0000-0000-000000000003","note":"reviewer to take over"}')
 expect_code "handoff task" 200 "$R"
+
+# ═════════════════════════════════════════════════════════════
+section "4b · Room membership (invite-only shared rooms)"
+# Dedicated task — section 4's handoff auto-grants membership, so the
+# invite flow is proven on a fresh room.
+R=$(req POST /api/v1/tasks "{\"workspace_id\":\"$WS2\",\"title\":\"$RUN_TAG invite room\",\"description\":\"membership flow\"}")
+expect_code "create invite-flow room" 201 "$R"
+MEM_TASK=$(body_of "$R" | jq -r .id)
+
+RT=""
+R=$(req POST /api/v1/auth/login '{"email":"reviewer@tolti.ai","password":"admin"}'); RT=$(body_of "$R" | jq -r .access_token)
+R=$(curl -s -w '\n%{http_code}' "http://localhost:3001/api/v1/tasks?workspace_id=$WS2" -H "Authorization: Bearer $RT")
+check "uninvited reviewer cannot see new shared room" 0 "$(body_of "$R" | jq "[.items[] | select(.id==\"$MEM_TASK\")] | length")"
+TOKEN="$RT"
+R=$(req GET "/api/v1/tasks/$MEM_TASK")
+check "uninvited reviewer GET task → 404" 404 "$(code_of "$R")"
+
+TOKEN=""
+R=$(req POST /api/v1/auth/login '{"email":"admin@tolti.ai","password":"admin"}'); TOKEN=$(body_of "$R" | jq -r .access_token)
+R=$(req GET "/api/v1/tasks/$MEM_TASK/members")
+expect_code "driver lists room members" 200 "$R"
+check "driver is implicit member" "true" "$(body_of "$R" | jq '[.[] | select(.is_driver)] | length > 0')"
+
+R=$(req POST "/api/v1/tasks/$MEM_TASK/members" '{"user_id":"00000000-0000-0000-0000-000000000003"}')
+expect_code "driver invites reviewer" 200 "$R"
+R=$(req POST "/api/v1/tasks/$MEM_TASK/members" '{"user_id":"00000000-0000-0000-0000-000000000005"}')
+expect_code "admin invites security approver" 200 "$R"
+
+# Reviewer probes with their own token
+TOKEN="$RT"
+R=$(req GET "/api/v1/tasks/$MEM_TASK")
+expect_code "invited reviewer now sees room" 200 "$R"
+R=$(req POST "/api/v1/tasks/$MEM_TASK/messages" '{"content":"Invited reviewer checking in."}')
+expect_code "invited reviewer can post" 200 "$R"
+R=$(req POST "/api/v1/tasks/$MEM_TASK/members" '{"user_id":"00000000-0000-0000-0000-000000000004"}')
+check "invitee cannot invite others" 403 "$(code_of "$R")"
+
+TOKEN=""
+R=$(req POST /api/v1/auth/login '{"email":"admin@tolti.ai","password":"admin"}'); TOKEN=$(body_of "$R" | jq -r .access_token)
+R=$(req DELETE "/api/v1/tasks/$MEM_TASK/members/00000000-0000-0000-0000-000000000003")
+expect_code "admin removes member" 200 "$R"
+TOKEN="$RT"
+R=$(req GET "/api/v1/tasks/$MEM_TASK")
+check "removed reviewer loses room" 404 "$(code_of "$R")"
+TOKEN=""
+R=$(req POST /api/v1/auth/login '{"email":"admin@tolti.ai","password":"admin"}'); TOKEN=$(body_of "$R" | jq -r .access_token)
+R=$(req POST "/api/v1/tasks/$MEM_TASK/members" '{"user_id":"00000000-0000-0000-0000-000000000003"}')
+expect_code "admin re-invites reviewer" 200 "$R"
 
 # ═════════════════════════════════════════════════════════════
 section "5 · Messages"
@@ -181,8 +228,12 @@ APR_ID=$(body_of "$R" | jq -r .id)
 
 TOKEN="$DRIVER_TOKEN"
 R=$(req POST "/api/v1/approvals/$APR_ID/decide" '{"decision":"APPROVED","reason":"matches field readings"}')
-check "driver cannot decide (403 expected)" 403 "$(code_of "$R")"
+check "non-member driver cannot decide (404 expected)" 404 "$(code_of "$R")"
 
+TOKEN=""
+R=$(req POST /api/v1/auth/login '{"email":"admin@tolti.ai","password":"admin"}'); TOKEN=$(body_of "$R" | jq -r .access_token)
+R=$(req POST "/api/v1/tasks/$TASK_ID/members" '{"user_id":"00000000-0000-0000-0000-000000000005"}')
+expect_code "admin invites security approver to the task" 200 "$R"
 TOKEN=""
 R=$(req POST /api/v1/auth/login '{"email":"security@tolti.ai","password":"admin"}'); TOKEN=$(body_of "$R" | jq -r .access_token)
 R=$(req POST "/api/v1/approvals/$APR_ID/decide" '{"decision":"APPROVED","reason":"matches field readings"}')

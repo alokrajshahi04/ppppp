@@ -33,6 +33,13 @@ CREATE TYPE task_priority AS ENUM (
     'CRITICAL'
 );
 
+-- SHARED rooms are visible to every workspace member.
+-- PRIVATE rooms are visible only to their driver (and ADMIN).
+CREATE TYPE task_kind AS ENUM (
+    'SHARED',
+    'PRIVATE'
+);
+
 CREATE TYPE evidence_kind AS ENUM (
     'PDF',
     'IMAGE',
@@ -176,6 +183,7 @@ CREATE TABLE tasks (
     description   TEXT,
     status        task_status NOT NULL DEFAULT 'DRAFT',
     priority      task_priority NOT NULL DEFAULT 'MEDIUM',
+    kind          task_kind NOT NULL DEFAULT 'SHARED',
     driver_id     UUID NOT NULL REFERENCES users(id),
     handed_off_to UUID REFERENCES users(id),
     parent_task_id UUID REFERENCES tasks(id),
@@ -187,6 +195,23 @@ CREATE TABLE tasks (
 CREATE INDEX idx_tasks_workspace ON tasks(workspace_id);
 CREATE INDEX idx_tasks_driver ON tasks(driver_id);
 CREATE INDEX idx_tasks_status ON tasks(status);
+
+-- ════════════════════════════════════════════════════════════════
+--  TASK (ROOM) MEMBERSHIP
+--  Shared rooms are visible only to invited workspace members.
+--  The driver is an implicit member. PRIVATE rooms have no members
+--  (driver-only). Workspace ADMINs retain audit visibility.
+-- ════════════════════════════════════════════════════════════════
+
+CREATE TABLE task_members (
+    task_id  UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    user_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    added_by UUID REFERENCES users(id),
+    added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (task_id, user_id)
+);
+
+CREATE INDEX idx_task_members_user ON task_members(user_id);
 
 -- ════════════════════════════════════════════════════════════════
 --  EVIDENCE  (uploaded files / metadata; blob lives in MinIO)

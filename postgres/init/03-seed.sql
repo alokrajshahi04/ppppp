@@ -49,12 +49,58 @@ VALUES (
     '00000000-0000-0000-0000-000000000001'
 ) ON CONFLICT (slug) DO NOTHING;
 
+-- Two extra demo workspaces so the switcher has real options
+INSERT INTO workspaces (id, name, slug, description, created_by) VALUES
+    ('00000000-0000-0000-0000-0000000000ab', 'Maintenance Ops', 'maintenance-ops',
+     'Field maintenance investigations and equipment history.', '00000000-0000-0000-0000-000000000001'),
+    ('00000000-0000-0000-0000-0000000000ac', 'Process Safety', 'process-safety',
+     'Safety reviews, HAZOP follow-ups and compliance notes.', '00000000-0000-0000-0000-000000000001')
+ON CONFLICT (slug) DO NOTHING;
+
 INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
     ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000001', 'ADMIN'),
     ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000002', 'DRIVER'),
     ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000003', 'REVIEWER'),
     ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000004', 'WATCHER'),
-    ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000005', 'SECURITY_APPROVER')
+    ('00000000-0000-0000-0000-0000000000aa', '00000000-0000-0000-0000-000000000005', 'SECURITY_APPROVER'),
+    ('00000000-0000-0000-0000-0000000000ab', '00000000-0000-0000-0000-000000000001', 'ADMIN'),
+    ('00000000-0000-0000-0000-0000000000ab', '00000000-0000-0000-0000-000000000002', 'DRIVER'),
+    ('00000000-0000-0000-0000-0000000000ab', '00000000-0000-0000-0000-000000000003', 'REVIEWER'),
+    ('00000000-0000-0000-0000-0000000000ab', '00000000-0000-0000-0000-000000000004', 'WATCHER'),
+    ('00000000-0000-0000-0000-0000000000ac', '00000000-0000-0000-0000-000000000001', 'ADMIN'),
+    ('00000000-0000-0000-0000-0000000000ac', '00000000-0000-0000-0000-000000000002', 'DRIVER'),
+    ('00000000-0000-0000-0000-0000000000ac', '00000000-0000-0000-0000-000000000005', 'SECURITY_APPROVER')
+ON CONFLICT DO NOTHING;
+
+-- ─────────────────────────────────────────────────────────────
+--  Demo rooms + a little activity so the workspace feels alive
+-- ─────────────────────────────────────────────────────────────
+
+INSERT INTO tasks (id, workspace_id, title, description, status, priority, kind, driver_id) VALUES
+    ('00000000-0000-0000-0000-00000000c001', '00000000-0000-0000-0000-0000000000aa',
+     'Pump 7 vibration anomaly', 'Investigate repeated bearing failures on line 7.',
+     'IN_PROGRESS', 'HIGH', 'SHARED', '00000000-0000-0000-0000-000000000002'),
+    ('00000000-0000-0000-0000-00000000c002', '00000000-0000-0000-0000-0000000000aa',
+     'Bearing lubrication schedule review', 'Compare the 500h interval against vendor guidance.',
+     'OPEN', 'MEDIUM', 'SHARED', '00000000-0000-0000-0000-000000000002'),
+    ('00000000-0000-0000-0000-00000000c003', '00000000-0000-0000-0000-0000000000aa',
+     'Compressor outage RCA', 'Root-cause analysis for the Q2 outage. Awaiting security sign-off.',
+     'AWAITING_APPROVAL', 'CRITICAL', 'SHARED', '00000000-0000-0000-0000-000000000002'),
+    ('00000000-0000-0000-0000-00000000c004', '00000000-0000-0000-0000-0000000000ab',
+     'Conveyor belt alignment check', 'Track misalignment reported by night shift.',
+     'OPEN', 'LOW', 'SHARED', '00000000-0000-0000-0000-000000000002'),
+    ('00000000-0000-0000-0000-00000000c005', '00000000-0000-0000-0000-0000000000aa',
+     'Audit prep checklist', 'Private working notes for the quarterly audit.',
+     'OPEN', 'MEDIUM', 'PRIVATE', '00000000-0000-0000-0000-000000000001')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO messages (task_id, sender_id, kind, content) VALUES
+    ('00000000-0000-0000-0000-00000000c001', '00000000-0000-0000-0000-000000000002', 'USER',
+     'Bearing temp spiked to 92°C overnight — rating is 80°C max. Attaching the sensor log.'),
+    ('00000000-0000-0000-0000-00000000c001', '00000000-0000-0000-0000-000000000003', 'USER',
+     'I''ll review the final note once the evidence is attached.'),
+    ('00000000-0000-0000-0000-00000000c003', '00000000-0000-0000-0000-000000000005', 'USER',
+     'Holding approval until the RCA draft cites the trip logs.')
 ON CONFLICT DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────
