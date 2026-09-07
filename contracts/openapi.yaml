@@ -1,0 +1,162 @@
+openapi: 3.1.0
+info:
+  title: Tolti AI Backend API
+  description: |
+    Sovereign, on-premise, multiplayer AI workbench backend.
+
+    Every endpoint is scoped to a workspace and authorised by JWT + RBAC.
+    Real-time collaboration runs over the WebSocket protocol documented separately.
+  version: 0.1.0
+  contact:
+    name: Tolti AI
+    url: https://tolti.local
+
+servers:
+  - url: http://localhost:3001
+    description: Local dev backend
+  - url: http://localhost/api
+    description: Local dev via nginx proxy
+
+tags:
+  - name: auth
+  - name: users
+  - name: workspaces
+  - name: tasks
+  - name: evidence
+  - name: messages
+  - name: ai
+  - name: approvals
+  - name: governance
+  - name: notifications
+  - name: system
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      tags: [system]
+      security: []
+      summary: Liveness + dependency health
+      responses:
+        '200':
+          description: ok
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      security: []
+      summary: Email/password login
+      responses:
+        '200': { description: Auth session }
+        '401': { description: Invalid credentials }
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      security: []
+      summary: Refresh access token
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke refresh token
+  /api/v1/auth/me:
+    get:
+      tags: [auth]
+      summary: Current user profile
+  /api/v1/users:
+    get:
+      tags: [users]
+      summary: List users (ADMIN)
+    post:
+      tags: [users]
+      summary: Create user (ADMIN)
+  /api/v1/users/{id}:
+    get: { tags: [users], summary: Get user }
+    patch: { tags: [users], summary: Update user (ADMIN) }
+    delete: { tags: [users], summary: Deactivate user (ADMIN) }
+  /api/v1/workspaces:
+    get: { tags: [workspaces], summary: List workspaces I belong to }
+    post: { tags: [workspaces], summary: Create workspace }
+  /api/v1/workspaces/{id}:
+    get: { tags: [workspaces], summary: Get workspace }
+    patch: { tags: [workspaces], summary: Update workspace }
+    delete: { tags: [workspaces], summary: Archive workspace }
+  /api/v1/workspaces/{id}/members:
+    get: { tags: [workspaces], summary: List members }
+    post: { tags: [workspaces], summary: Add member }
+  /api/v1/workspaces/{id}/members/{userId}:
+    patch: { tags: [workspaces], summary: Change member role }
+    delete: { tags: [workspaces], summary: Remove member }
+  /api/v1/tasks:
+    get: { tags: [tasks], summary: List tasks (filterable) }
+    post: { tags: [tasks], summary: Create task (DRIVER+) }
+  /api/v1/tasks/{id}:
+    get: { tags: [tasks], summary: Get task detail }
+    patch: { tags: [tasks], summary: Update task }
+    delete: { tags: [tasks], summary: Archive task }
+  /api/v1/tasks/{id}/handoff:
+    post: { tags: [tasks], summary: Hand off task to another user }
+  /api/v1/tasks/{id}/messages:
+    get: { tags: [messages], summary: List messages for a task }
+    post: { tags: [messages], summary: Post a chat message }
+  /api/v1/tasks/{id}/evidence:
+    get: { tags: [evidence], summary: List evidence for a task }
+    post:
+      tags: [evidence]
+      summary: Upload evidence (returns presigned PUT ticket)
+  /api/v1/evidence/{id}:
+    get: { tags: [evidence], summary: Get evidence metadata }
+    delete: { tags: [evidence], summary: Delete evidence }
+  /api/v1/evidence/{id}/download:
+    get:
+      tags: [evidence]
+      summary: Get a presigned download URL for the raw file
+  /api/v1/ai/runs:
+    get: { tags: [ai], summary: List AI runs for a task }
+    post:
+      tags: [ai]
+      summary: Start a new AI run (routes via Agent Router)
+  /api/v1/ai/runs/{id}:
+    get: { tags: [ai], summary: Get AI run detail + citations }
+    delete: { tags: [ai], summary: Cancel a running AI run }
+  /api/v1/ai/runs/{id}/stream:
+    get:
+      tags: [ai]
+      summary: SSE stream of an AI run's tokens
+  /api/v1/approvals:
+    get: { tags: [approvals], summary: List approvals (filterable) }
+    post: { tags: [approvals], summary: Request approval }
+  /api/v1/approvals/{id}:
+    get: { tags: [approvals], summary: Get approval }
+  /api/v1/approvals/{id}/decide:
+    post:
+      tags: [approvals]
+      summary: Approve or reject (SECURITY_APPROVER + ADMIN)
+  /api/v1/audit:
+    get:
+      tags: [governance]
+      summary: Query audit logs (ADMIN / SECURITY_APPROVER)
+  /api/v1/models:
+    get: { tags: [governance], summary: List model configs }
+    post: { tags: [governance], summary: Add model config (ADMIN) }
+  /api/v1/models/{id}:
+    patch: { tags: [governance], summary: Update model config (ADMIN) }
+    delete: { tags: [governance], summary: Remove model config (ADMIN) }
+  /api/v1/routing-policies:
+    get: { tags: [governance], summary: List routing policies }
+    post: { tags: [governance], summary: Create routing policy (ADMIN) }
+  /api/v1/routing-policies/{id}:
+    patch: { tags: [governance], summary: Update routing policy (ADMIN) }
+  /api/v1/routing-policies/{id}/activate:
+    post: { tags: [governance], summary: Activate a routing policy (ADMIN) }
+  /api/v1/notifications:
+    get: { tags: [notifications], summary: My notifications }
+  /api/v1/notifications/{id}/read:
+    post: { tags: [notifications], summary: Mark notification read }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

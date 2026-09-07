@@ -1,0 +1,140 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: tolti-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tolti}
+      POSTGRES_USER: ${POSTGRES_USER:-tolti}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tolti}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tolti} -d ${POSTGRES_DB:-tolti}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - tolti-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: tolti-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tolti}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-tolti}
+    ports:
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tolti-network
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: tolti-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-tolti} ${MINIO_ROOT_PASSWORD:-tolti};
+      mc mb --ignore-existing local/${MINIO_BUCKET:-evidence};
+      mc anonymous set none local/${MINIO_BUCKET:-evidence};
+      echo 'MinIO bucket ${MINIO_BUCKET:-evidence} ready';
+      "
+    networks:
+      - tolti-network
+
+  ai-engine:
+    build:
+      context: ./ai-engine
+      dockerfile: Dockerfile
+    container_name: tolti-ai-engine
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tolti}:${POSTGRES_PASSWORD:-tolti}@postgres:5432/${POSTGRES_DB:-tolti}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tolti}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-tolti}
+      MINIO_BUCKET: ${MINIO_BUCKET:-evidence}
+      AI_ENGINE_PORT: 8000
+      MODEL_DEFAULT_BASE_URL: ${MODEL_DEFAULT_BASE_URL:-http://host.docker.internal:11434/v1}
+      MODEL_DEFAULT_API_KEY: ${MODEL_DEFAULT_API_KEY:-ollama}
+    ports:
+      - "${AI_ENGINE_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - tolti-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tolti-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tolti}:${POSTGRES_PASSWORD:-tolti}@postgres:5432/${POSTGRES_DB:-tolti}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-tolti}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-tolti}
+      MINIO_BUCKET: ${MINIO_BUCKET:-evidence}
+      AI_ENGINE_URL: http://ai-engine:8000
+      BACKEND_PORT: 3001
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production-tolti-sovereign-secret}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      NODE_ENV: ${NODE_ENV:-development}
+    ports:
+      - "${BACKEND_PORT:-3001}:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      ai-engine:
+        condition: service_started
+    networks:
+      - tolti-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3001}
+        VITE_WS_URL: ${VITE_WS_URL:-ws://localhost:3001}
+    container_name: tolti-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      - backend
+    networks:
+      - tolti-network
+
+volumes:
+  pgdata:
+  minio-data:
+
+networks:
+  tolti-network:
+    driver: bridge
