@@ -156,8 +156,23 @@ export async function taskRoutes(app: any): Promise<void> {
         const u = asUser(req);
         const body = parseBody(HandOffSchema, req.body);
         const task = await requireTaskAccess(id, u);
-        const updated = await handOff(id, body.to_user_id);
+        // Only the current driver (or a system admin) can hand the room over.
+        const roles = u.system_roles as UserRole[];
+        if (task.driver_id !== u.sub && !roles.includes('ADMIN')) {
+            throw forbidden('only the current driver can hand off this room');
+        }
+        if (body.to_user_id === task.driver_id) throw badRequest('that user is already driving');
+        const updated = await handOff(id, u.sub, body.to_user_id);
         await addTaskMember({ task_id: id, user_id: body.to_user_id, added_by: u.sub });
+        // Notify the new driver so they know the room is now theirs.
+        await notify({
+            user_id: body.to_user_id,
+            workspace_id: task.workspace_id,
+            task_id: id,
+            kind: 'ROOM_HANDOFF',
+            title: `${u.email} handed “${task.title}” to you`,
+            body: 'You are now driving this room.',
+        });
         audit({
             actor_id: u.sub,
             event: 'TASK_HANDED_OFF',

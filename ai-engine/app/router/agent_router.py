@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from app.config import get_settings
+from app.automations import match_automation
 from app.schemas import RouteRequest
 
 
 class AgentRouter:
     """Pure rule-based router.
 
-    Looks at the prompt, the supplied evidence kinds, and explicit hints from the
-    caller. Returns the capability + a specific model that should service it.
+    Order of precedence:
+      1. explicit capability from the caller
+      2. automation keyword match (agentic actions from plain chat)
+      3. evidence-kind and prompt heuristics
+      4. default text reasoning
     """
 
     async def decide(self, req: RouteRequest) -> dict | None:
@@ -27,7 +31,21 @@ class AgentRouter:
                 "confidence": 1.0,
             }
 
-        # 2. Evidence-kind heuristics
+        # 2. Automation match — plain chat can trigger agentic actions
+        auto = match_automation(req.prompt)
+        if auto:
+            aid, params = auto
+            from app.automations import get_automation
+            inst = get_automation(aid)()
+            return {
+                "capability": "AUTOMATION",
+                "model_id": f"automation:{aid}",
+                "reason": f"matches automation “{inst.title}”",
+                "confidence": 0.95,
+                "params": params,
+            }
+
+        # 3. Evidence-kind heuristics
         if evidence_hint in {"IMAGE", "DIAGRAM"} or any(
             kw in prompt_l for kw in ("diagram", "schematic", "blueprint", "image", "photo", "scan")
         ):
@@ -38,7 +56,7 @@ class AgentRouter:
                 "confidence": 0.9,
             }
 
-        # 3. OCR trigger
+        # 4. OCR trigger
         if any(kw in prompt_l for kw in ("ocr", "extract text", "transcribe", "scan text")):
             return {
                 "capability": "OCR",
@@ -47,7 +65,7 @@ class AgentRouter:
                 "confidence": 0.9,
             }
 
-        # 4. Code trigger
+        # 5. Code trigger
         if any(
             kw in prompt_l
             for kw in ("code", "function", "script", "implement", "refactor", "bug", "compile")
@@ -59,7 +77,7 @@ class AgentRouter:
                 "confidence": 0.85,
             }
 
-        # 5. Default = text reasoning
+        # 6. Default = text reasoning
         return {
             "capability": "TEXT",
             "model_id": settings.text_model,

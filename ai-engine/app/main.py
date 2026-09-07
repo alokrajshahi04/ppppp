@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from app.config import get_settings
 from app.logging import configure_logging, get_logger
 from app.routers import (
+    automations,
     code,
     embed,
     evidence,
@@ -62,3 +63,4 @@ app.include_router(code.router, prefix="/v1", tags=["code"])
 app.include_router(route.router, prefix="/v1", tags=["route"])
 app.include_router(verify.router, prefix="/v1", tags=["verify"])
 app.include_router(evidence.router, prefix="/v1", tags=["evidence"])
+app.include_router(automations.router, prefix="/v1", tags=["automations"])

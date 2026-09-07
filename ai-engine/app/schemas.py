@@ -156,7 +156,7 @@ class CodeResponse(BaseModel):
 #  Agent Router
 # ─────────────────────────────────────────────────────────────
 
-Capability = Literal["OCR", "VISION", "TEXT", "CODE", "EMBEDDING"]
+Capability = Literal["OCR", "VISION", "TEXT", "CODE", "EMBEDDING", "AUTOMATION"]
 EvidenceKind = Literal["PDF", "IMAGE", "DIAGRAM", "TEXT", "CODE", "OTHER"]
 
 
@@ -173,6 +173,7 @@ class RouteDecision(BaseModel):
     model_id: str
     reason: str
     confidence: float = Field(ge=0.0, le=1.0)
+    params: dict[str, Any] | None = None
 
 
 # ─────────────────────────────────────────────────────────────

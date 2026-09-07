@@ -1,11 +1,12 @@
 import { z } from 'zod';
+import type { Task } from '@tolti/contracts';
 import { asUser, forbidden, notFound } from '../utils/errors.js';
 import { parseBody } from '../utils/validation.js';
 import { getTask } from '../tasks/repo.js';
 import { requireTaskAccess } from '../tasks/access.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 import { audit } from '../governance/audit.js';
-import { code, reason, retrieve, route, vision } from './client.js';
+import { code, reason, retrieve, route, vision, listAutomations, executeAutomation } from './client.js';
 import {
     completeRun,
     createRun,
@@ -20,12 +21,13 @@ import { indexEvidence } from './client.js';
 
 const StartSchema = z.object({
     task_id: z.string().uuid(),
-    capability: z.enum(['OCR', 'VISION', 'TEXT', 'CODE', 'EMBEDDING']).optional(),
+    capability: z.enum(['OCR', 'VISION', 'TEXT', 'CODE', 'EMBEDDING', 'AUTOMATION']).optional(),
     prompt: z.string().min(1),
     evidence_ids: z.array(z.string().uuid()).optional(),
     temperature: z.number().min(0).max(2).optional(),
     max_tokens: z.number().int().positive().optional(),
     auto_index: z.boolean().optional(),
+    automation_params: z.record(z.unknown()).optional(),
 });
 
 export async function aiRoutes(app: any): Promise<void> {
@@ -94,6 +96,7 @@ export async function aiRoutes(app: any): Promise<void> {
             evidenceIds: body.evidence_ids,
             temperature: body.temperature,
             maxTokens: body.max_tokens,
+            automationParams: { ...(decision.params ?? {}), ...(body.automation_params ?? {}) },
         });
 
         return reply.status(202).send(run);
@@ -119,6 +122,75 @@ export async function aiRoutes(app: any): Promise<void> {
         broadcastTaskEvent(run.task_id, { type: 'ai:completed', payload: { run: { ...run, status: 'CANCELLED' } } });
         return { ok: true };
     });
+
+    // ── Automations (agentic actions) ──────────────────────────
+    app.get('/api/v1/automations', async () => {
+        // Registry listing from the AI engine; falls back to a clear error.
+        return listAutomations();
+    });
+
+    app.post('/api/v1/automations/:id/execute', async (req: any, reply: any) => {
+        const { id } = req.params as { id: string };
+        const u = asUser(req);
+        const body = parseBody(z.object({
+            task_id: z.string().uuid(),
+            params: z.record(z.unknown()).optional(),
+        }), req.body);
+        const task: Task = await requireTaskAccess(body.task_id, u);
+
+        const run = await createRun({
+            task_id: task.id,
+            triggered_by: u.sub,
+            capability: 'AUTOMATION' as any,
+            model_id: `automation:${id}`,
+            prompt: `Run automation: ${id}`,
+        });
+        audit({
+            actor_id: u.sub,
+            event: 'AI_RUN_STARTED',
+            task_id: task.id,
+            workspace_id: task.workspace_id,
+            target_id: run.id,
+            payload: { capability: 'AUTOMATION', automation: id },
+        });
+        broadcastTaskEvent(task.id, { type: 'ai:started', payload: { run } });
+
+        // Automations are deterministic and fast — run inline, not in background.
+        try {
+            await startRun(run.id);
+            const result = await executeAutomation(id, { task_id: task.id, params: body.params ?? {} });
+            if (!result.ok) {
+                const hint = result.hint ? ` — ${result.hint}` : '';
+                throw new Error(`${result.error ?? 'automation failed'}${hint}`);
+            }
+            await completeRun(run.id, {
+                response: result.summary ?? 'Automation completed.',
+                status: 'SUCCEEDED',
+            });
+            audit({
+                actor_id: u.sub,
+                event: 'AI_RUN_COMPLETED',
+                task_id: task.id,
+                workspace_id: task.workspace_id,
+                target_id: run.id,
+                payload: { automation: id },
+            });
+        } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            await failRun(run.id, msg);
+            audit({
+                actor_id: u.sub,
+                event: 'AI_RUN_FAILED',
+                task_id: task.id,
+                workspace_id: task.workspace_id,
+                target_id: run.id,
+                payload: { automation: id, error: msg },
+            });
+        }
+        const final = await getRun(run.id);
+        if (final) broadcastTaskEvent(task.id, { type: 'ai:completed', payload: { run: final } });
+        return reply.send(final);
+    });
 }
 
 interface RunArgs {
@@ -131,6 +203,7 @@ interface RunArgs {
     evidenceIds?: string[];
     temperature?: number;
     maxTokens?: number;
+    automationParams?: Record<string, unknown>;
 }
 
 async function runAgent(a: RunArgs): Promise<void> {
@@ -150,7 +223,16 @@ async function runAgent(a: RunArgs): Promise<void> {
 
         let response: { answer: string; citations: Array<{ evidence_id: string; chunk_id: string; quote: string; confidence: number }>; model: string; token_usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } };
 
-        if (a.capability === 'CODE') {
+        if (a.capability === 'AUTOMATION') {
+            // Agentic action — executes a registered automation; no LLM involved.
+            const autoId = a.modelId.startsWith('automation:') ? a.modelId.slice('automation:'.length) : a.modelId;
+            const r = await executeAutomation(autoId, { task_id: a.taskId, params: a.automationParams ?? {} });
+            if (!r.ok) {
+                const hint = r.hint ? ` — ${r.hint}` : '';
+                throw new Error(`${r.error ?? 'automation failed'}${hint}`);
+            }
+            response = { answer: r.summary ?? 'Automation completed.', citations: [], model: a.modelId };
+        } else if (a.capability === 'CODE') {
             const r = await code({ prompt: a.prompt, model_id: a.modelId });
             response = { answer: `\`\`\`${r.language}\n${r.code}\n\`\`\`\n\n${r.explanation}`, citations: [], model: r.model };
         } else if (a.capability === 'VISION') {

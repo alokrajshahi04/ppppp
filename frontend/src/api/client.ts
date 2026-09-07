@@ -79,3 +79,18 @@ export const api = {
     putRaw: (url: string, body: Blob | File, contentType: string) =>
         fetch(url, { method: 'PUT', body, headers: { 'Content-Type': contentType } }),
 };
+
+// ── Automations (agentic actions, registry lives in the AI engine) ──
+export interface AutomationParamDef {
+    name: string;
+    label: string;
+    required: boolean;
+    placeholder: string;
+}
+export interface AutomationDef {
+    id: string;
+    title: string;
+    description: string;
+    keywords: string[];
+    params: AutomationParamDef[];
+}

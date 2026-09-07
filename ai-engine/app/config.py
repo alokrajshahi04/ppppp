@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     # ── Timeouts ──────────────────────────────────────────────
     request_timeout_seconds: float = 120.0
 
+    # ── SMTP (optional — enables the email automation) ────────
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_pass: str = ""
+    smtp_from: str = ""
+    smtp_use_tls: bool = True
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

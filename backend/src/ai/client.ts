@@ -52,7 +52,7 @@ export interface CodeResp { code: string; explanation: string; language: string;
 export const code = (req: CodeReq) => call<CodeResp>('/v1/code', req);
 
 export interface RouteReq { task_id?: string; capability?: string; input_kind?: string; prompt: string; evidence_ids?: string[] }
-export interface RouteResp { capability: string; model_id: string; reason: string; confidence: number }
+export interface RouteResp { capability: string; model_id: string; reason: string; confidence: number; params?: Record<string, unknown> | null }
 export const route = (req: RouteReq) => call<RouteResp>('/v1/route', req);
 
 export interface IndexReq {
@@ -71,6 +71,26 @@ export interface RetrieveResp {
     chunks: Array<{ chunk_id: string; evidence_id: string; filename: string; content: string; score: number }>;
 }
 export const retrieve = (req: RetrieveReq) => call<RetrieveResp>('/v1/retrieve', req);
+
+// ── Automations (agentic actions) ────────────────────────────
+export interface AutomationParamDef { name: string; label: string; required: boolean; placeholder: string }
+export interface AutomationDef {
+    id: string;
+    title: string;
+    description: string;
+    keywords: string[];
+    params: AutomationParamDef[];
+}
+export const listAutomations = () =>
+    fetch(`${BASE}/v1/automations`).then(async (r) => {
+        if (!r.ok) throw new Error(`automations list failed: ${r.status}`);
+        return (await r.json()) as AutomationDef[];
+    });
+
+export interface AutomationExecReq { task_id: string; params?: Record<string, unknown> }
+export interface AutomationExecResp { ok: boolean; summary?: string; error?: string; hint?: string; details?: Record<string, unknown> }
+export const executeAutomation = (id: string, req: AutomationExecReq) =>
+    call<AutomationExecResp>(`/v1/automations/${id}/execute`, req);
 
 export async function pingAi(): Promise<boolean> {
     try {

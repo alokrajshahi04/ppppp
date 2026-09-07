@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import type { AIRun, Approval, Evidence, Message, PresenceEntry, Task, TaskMember, WorkspaceMember } from '@tolti/contracts';
 import { api } from '../api/client';
+import type { AutomationDef } from '../api/client';
 import { useTaskSocket, type WSEvent } from '../api/ws';
 import { hasRole, initialsOf, useAuth } from '../store/auth';
 import {
@@ -99,6 +100,11 @@ export function RoomPage() {
                 break;
             case 'task:state':
                 setTask(ev.payload.task);
+                // Handoff changes the driver — refresh the member list so the
+                // drive strip names the new driver immediately.
+                if (task && ev.payload.task.driver_id !== task.driver_id) {
+                    void refreshMembers();
+                }
                 break;
             case 'presence:update':
                 setPresence((cur) => {
@@ -126,6 +132,24 @@ export function RoomPage() {
         if (!id) return;
         try { setMembers(await api.get<TaskMember[]>(`/api/v1/tasks/${id}/members`)); } catch { /* */ }
     }, [id]);
+
+    const [automations, setAutomations] = useState<AutomationDef[]>([]);
+    useEffect(() => {
+        api.get<AutomationDef[]>('/api/v1/automations').then(setAutomations).catch(() => setAutomations([]));
+    }, []);
+
+    async function runAutomation(automationId: string, params?: Record<string, unknown>) {
+        if (!task) return;
+        await api.post(`/api/v1/automations/${automationId}/execute`, { task_id: task.id, params });
+        // The automation may post a SYSTEM message and/or change rooms — refresh.
+        const [msg, rn] = await Promise.all([
+            api.get<Message[]>(`/api/v1/tasks/${task.id}/messages`),
+            api.get<AIRun[]>(`/api/v1/tasks/${task.id}/ai/runs`),
+        ]);
+        setMessages(msg);
+        setRuns(rn);
+        window.dispatchEvent(new CustomEvent('tolti:rooms-changed'));
+    }
 
     const online = useMemo(() => presence.filter((p) => p.status === 'ONLINE'), [presence]);
     const canInvite = useMemo(() => {
@@ -292,6 +316,10 @@ export function RoomPage() {
                             approvals={approvals}
                             canConfigure={hasRole(user?.system_roles, 'ADMIN')}
                             canDecide={hasRole(user?.system_roles, 'SECURITY_APPROVER') || hasRole(user?.system_roles, 'ADMIN')}
+                            automations={automations}
+                            onRunAutomation={(id, params) => runAutomation(id, params)}
+                            roomId={task.id}
+                            onRoomChanged={() => window.dispatchEvent(new CustomEvent('tolti:rooms-changed'))}
                             onRetry={(p) => void startRun(p, 'TEXT')}
                             onRequestApproval={async () => {
                                 await api.post('/api/v1/approvals', { task_id: task.id, kind: 'OUTPUT', summary: `Review outputs in “${task.title}”` });
@@ -315,32 +343,36 @@ export function RoomPage() {
                         <span className="drive-spacer" />
                         <span className="muted" style={{ fontSize: 'var(--fz-tiny)' }}>{connected ? 'live' : 'reconnecting…'}</span>
                         {driver.isMe && (
-                            <button className="btn btn-sm" onClick={() => setHandoffOpen((v) => !v)}>
-                                <IconSwap size={13} /> Hand off
-                            </button>
-                        )}
-                        {handoffOpen && (
-                            <div className="pop" style={{ right: 'auto', left: 0, bottom: 'calc(100% + 6px)', top: 'auto' }}>
-                                <div className="pop-title">Hand this room to</div>
-                                {members.filter((m) => m.user_id !== user?.id).length === 0 ? (
-                                    <div className="muted" style={{ padding: '2px 8px', fontSize: 'var(--fz-tiny)' }}>
-                                        Invite teammates first — handoff works within room members.
+                            <div className="rel">
+                                <button className="btn btn-sm" onClick={() => setHandoffOpen((v) => !v)}>
+                                    <IconSwap size={13} /> Hand off
+                                </button>
+                                {handoffOpen && (
+                                    <div className="pop" style={{ right: 0, left: 'auto', bottom: 'calc(100% + 6px)', top: 'auto', minWidth: 240 }}>
+                                        <div className="pop-title">Hand this room to</div>
+                                        {members.filter((m) => m.user_id !== user?.id).length === 0 ? (
+                                            <div className="muted" style={{ padding: '2px 8px', fontSize: 'var(--fz-tiny)' }}>
+                                                Invite teammates first — handoff works within room members.
+                                            </div>
+                                        ) : members.filter((m) => m.user_id !== user?.id).map((m) => (
+                                            <button key={m.user_id} className="pop-row" style={{ width: '100%', border: 0, background: 'transparent', textAlign: 'left', cursor: 'pointer' }}
+                                                onClick={async () => {
+                                                    await api.post(`/api/v1/tasks/${task.id}/handoff`, { to_user_id: m.user_id });
+                                                    setHandoffOpen(false);
+                                                }}>
+                                                <span className="row" style={{ gap: 8 }}>
+                                                    <span className="avatar" style={{ width: 22, height: 22, fontSize: 8 }}>{initialsOf(m.display_name)}</span>
+                                                    <span className="pr-main">{m.display_name}</span>
+                                                </span>
+                                                {m.is_driver && <span className="pill pill-accent">driver</span>}
+                                            </button>
+                                        ))}
                                     </div>
-                                ) : members.filter((m) => m.user_id !== user?.id).map((m) => (
-                                    <button key={m.user_id} className="pop-row" style={{ width: '100%', border: 0, background: 'transparent', textAlign: 'left', cursor: 'pointer' }}
-                                        onClick={async () => {
-                                            await api.post(`/api/v1/tasks/${task.id}/handoff`, { to_user_id: m.user_id });
-                                            setHandoffOpen(false);
-                                        }}>
-                                        <span className="pr-main">{m.display_name}</span>
-                                        {m.is_driver && <span className="pill pill-accent">driver</span>}
-                                    </button>
-                                ))}
+                                )}
                             </div>
                         )}
                     </div>
                     <Composer
-                        hint={tab === 'code' ? 'Describe what the code agent should do…' : 'Ask the AI, or write to the room…'}
                         onSend={async (text) => {
                             await api.post(`/api/v1/tasks/${task.id}/messages`, { content: text });
                         }}
@@ -691,11 +723,10 @@ function CodeTab({
                 </div>
             )}
             <Composer
-                hint="e.g. Write a bash script to archive last month’s sensor logs"
+                initialMode="ai"
                 onSend={async () => { /* code tab is AI-only */ }}
                 onReviewRun={async (t) => { onRun(t); setPrompt(''); }}
                 controlledText={[prompt, setPrompt]}
-                runLabel="Run code agent"
             />
         </div>
     );
@@ -731,6 +762,7 @@ function RunCardSimple({ run, canConfigure, onRetry }: { run: AIRun; canConfigur
 
 function AgentTab({
     runs, approvals, canConfigure, canDecide, onRetry, onRequestApproval, onDecide,
+    automations, onRunAutomation, roomId, onRoomChanged,
 }: {
     runs: AIRun[];
     approvals: Approval[];
@@ -739,8 +771,13 @@ function AgentTab({
     onRetry: (p: string) => void;
     onRequestApproval: () => Promise<void>;
     onDecide: (id: string, d: 'APPROVED' | 'REJECTED') => Promise<void>;
+    automations: AutomationDef[];
+    onRunAutomation: (id: string, params?: Record<string, unknown>) => Promise<void>;
+    roomId: string;
+    onRoomChanged: (newRoomId: string) => void;
 }) {
     const [busy, setBusy] = useState(false);
+    const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
     const recent = runs.slice(0, 10);
     return (
         <div className="stack" style={{ maxWidth: 860 }}>
@@ -752,6 +789,66 @@ function AgentTab({
                 <button className="btn" disabled={busy} onClick={async () => { setBusy(true); try { await onRequestApproval(); } finally { setBusy(false); } }}>
                     Request approval
                 </button>
+            </div>
+
+            <div className="card">
+                <div className="card-title">Automations</div>
+                <div className="muted" style={{ fontSize: 'var(--fz-small)', marginBottom: 'var(--s-3)' }}>
+                    Agentic actions that do real work on this room. They also trigger from plain chat — e.g. type “export a report” or “email the summary”.
+                </div>
+                {automations.length === 0 ? (
+                    <div className="muted">Automation registry unavailable.</div>
+                ) : (
+                    <div className="stack">
+                        {automations.map((a) => (
+                            <div key={a.id} className="row-between" style={{ borderBottom: '1px solid var(--line)', paddingBottom: 'var(--s-3)', gap: 'var(--s-3)', flexWrap: 'wrap' }}>
+                                <span style={{ minWidth: 220, flex: 1 }}>
+                                    <span style={{ color: 'var(--ink-1)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                        <IconSpark size={13} /> {a.title}
+                                    </span>
+                                    <span className="muted" style={{ display: 'block', fontSize: 'var(--fz-small)', marginTop: 2 }}>{a.description}</span>
+                                    {a.params.length > 0 && (
+                                        <span className="row" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
+                                            {a.params.map((p) => (
+                                                <input
+                                                    key={p.name}
+                                                    className="input"
+                                                    style={{ maxWidth: 260, padding: '4px 8px', fontSize: 'var(--fz-small)' }}
+                                                    placeholder={`${p.label}${p.required ? ' *' : ''} — ${p.placeholder}`}
+                                                    value={paramDraft[`${a.id}.${p.name}`] ?? ''}
+                                                    onChange={(e) => setParamDraft((d) => ({ ...d, [`${a.id}.${p.name}`]: e.target.value }))}
+                                                />
+                                            ))}
+                                        </span>
+                                    )}
+                                </span>
+                                <button
+                                    className="btn btn-accent btn-sm"
+                                    disabled={busy}
+                                    onClick={async () => {
+                                        const params: Record<string, unknown> = {};
+                                        for (const p of a.params) {
+                                            const v = paramDraft[`${a.id}.${p.name}`]?.trim();
+                                            if (v) params[p.name] = v;
+                                        }
+                                        setBusy(true);
+                                        try {
+                                            const run = await api.post<any>(`/api/v1/automations/${a.id}/execute`, { task_id: roomId, params });
+                                            if (a.id === 'followup_task' && run?.response) {
+                                                // The response summary does not carry the id; the SYSTEM message in chat links it.
+                                                onRoomChanged(roomId);
+                                            }
+                                        } finally {
+                                            setBusy(false);
+                                        }
+                                    }}
+                                >
+                                    <IconArrowUp size={12} /> Run
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
 
             <div className="card">
@@ -825,22 +922,25 @@ function AgentTab({
 }
 
 // ── Composer ─────────────────────────────────────────────────────
+// One submit action; a segmented toggle decides whether the message goes
+// to the team or to the AI. ⌘↵ always runs the AI regardless of mode.
 function Composer({
-    hint, onSend, onReviewRun, onAttach, runLabel = 'Review & run', controlledText,
+    onSend, onReviewRun, onAttach, controlledText, initialMode = 'team',
 }: {
-    hint: string;
+    hint?: string;
     onSend: (text: string) => Promise<void>;
     onReviewRun: (text: string) => Promise<void>;
     onAttach?: (f: File) => void;
     runLabel?: string;
     controlledText?: [string, (t: string) => void];
+    initialMode?: 'team' | 'ai';
 }) {
     const [internal, setInternal] = useState('');
+    const [mode, setMode] = useState<'team' | 'ai'>(initialMode);
     const text = controlledText ? controlledText[0] : internal;
     const setText = controlledText ? controlledText[1] : setInternal;
     const [busy, setBusy] = useState(false);
     const ref = useRef<HTMLTextAreaElement | null>(null);
-    void controlledText;
 
     async function submit(kind: 'send' | 'run') {
         const t = text.trim();
@@ -861,7 +961,9 @@ function Composer({
             <textarea
                 ref={ref}
                 rows={1}
-                placeholder={hint}
+                placeholder={mode === 'ai'
+                    ? 'Ask the AI — it reads this room’s evidence and discussion…'
+                    : 'Write to the room…'}
                 value={text}
                 onChange={(e) => {
                     setText(e.target.value);
@@ -869,7 +971,7 @@ function Composer({
                     e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
                 }}
                 onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit('send'); }
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(mode === 'ai' ? 'run' : 'send'); }
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submit('run'); }
                 }}
             />
@@ -884,14 +986,20 @@ function Composer({
                         }} />
                     </label>
                 )}
+                <div className="seg" role="tablist" aria-label="Composer mode">
+                    <button className={`seg-btn ${mode === 'team' ? 'is-active' : ''}`} onClick={() => setMode('team')}>
+                        <IconSend size={11} /> Team
+                    </button>
+                    <button className={`seg-btn ${mode === 'ai' ? 'is-active' : ''}`} onClick={() => setMode('ai')}>
+                        <IconSpark size={11} /> Ask AI
+                    </button>
+                </div>
                 <span className="model-chip"><IconSpark size={11} /> Auto route · evidence attached</span>
                 <span className="cb-spacer" />
                 <span className="kbd">⌘↵</span>
-                <button className="btn btn-sm" disabled={busy} onClick={() => void submit('send')}>
-                    <IconSend size={12} /> <span className="cb-send-label">Send to room</span>
-                </button>
-                <button className="btn btn-accent btn-sm" disabled={busy} onClick={() => void submit('run')}>
-                    {busy ? <span className="spinner" /> : <IconArrowUp size={12} />} {runLabel}
+                <button className="btn btn-accent btn-sm" disabled={busy} onClick={() => void submit(mode === 'ai' ? 'run' : 'send')}>
+                    {busy ? <span className="spinner" /> : mode === 'ai' ? <IconArrowUp size={12} /> : <IconSend size={12} />}
+                    <span className="cb-send-label">{mode === 'ai' ? 'Run AI' : 'Send'}</span>
                 </button>
             </div>
         </div>

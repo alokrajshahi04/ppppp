@@ -76,7 +76,8 @@ CREATE TYPE model_capability AS ENUM (
     'VISION',
     'TEXT',
     'CODE',
-    'EMBEDDING'
+    'EMBEDDING',
+    'AUTOMATION'
 );
 
 CREATE TYPE audit_event_kind AS ENUM (

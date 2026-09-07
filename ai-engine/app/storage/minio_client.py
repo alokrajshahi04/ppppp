@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from functools import lru_cache
 
 from minio import Minio
@@ -34,8 +35,8 @@ def get_object_bytes(key: str) -> bytes:
 
 
 def presigned_upload_url(key: str, expires_seconds: int = 3600) -> str:
-    return _client().presigned_put_object(_bucket(), key, expires=expires_seconds)
+    return _client().presigned_put_object(_bucket(), key, expires=timedelta(seconds=expires_seconds))
 
 
 def presigned_download_url(key: str, expires_seconds: int = 3600) -> str:
-    return _client().presigned_get_object(_bucket(), key, expires=expires_seconds)
+    return _client().presigned_get_object(_bucket(), key, expires=timedelta(seconds=expires_seconds))

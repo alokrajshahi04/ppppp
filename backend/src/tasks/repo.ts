@@ -141,10 +141,13 @@ export async function updateTask(
     return getTask(id);
 }
 
-export async function handOff(taskId: string, toUserId: string): Promise<Task | null> {
+export async function handOff(taskId: string, fromUserId: string, toUserId: string): Promise<Task | null> {
     await query(
-        `UPDATE tasks SET handed_off_to = $2 WHERE id = $1`,
-        [taskId, toUserId],
+        `UPDATE tasks
+            SET driver_id = $2,
+                handed_off_to = $3
+          WHERE id = $1`,
+        [taskId, toUserId, fromUserId],
     );
     return getTask(taskId);
 }
