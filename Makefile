@@ -58,8 +58,8 @@ shell-db: ## Open psql in postgres container
 shell-minio: ## Open mc shell in minio-init container
 	$(COMPOSE) run --rm minio-init /bin/sh
 
-test: ## Run tests (placeholder)
-	@echo "Tests will be wired in Phase 3."
+test: ## Run the 45-check API E2E suite
+	./scripts/api-test.sh
 
 lint: ## Run linters (placeholder)
-	@echo "Linters will be wired in Phase 3."
+	@echo "Linters will be wired in a later wave."

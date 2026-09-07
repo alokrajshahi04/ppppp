@@ -49,7 +49,8 @@ export function DashboardPage() {
                     {tasks.length === 0 ? (
                         <div className="empty">No tasks yet. <Link to="/tasks/new" className="muted">Create one.</Link></div>
                     ) : (
-                        <table className="table">
+                        <div className="table-wrap">
+                    <table className="table">
                             <thead>
                                 <tr>
                                     <th>Title</th>
@@ -69,6 +70,7 @@ export function DashboardPage() {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
                     )}
                 </div>
                 <div className="card">

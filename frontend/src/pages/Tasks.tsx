@@ -58,6 +58,7 @@ export function TaskListPage() {
                 ) : tasks.length === 0 ? (
                     <div className="empty">No tasks match these filters.</div>
                 ) : (
+                    <div className="table-wrap">
                     <table className="table">
                         <thead>
                             <tr>
@@ -80,6 +81,7 @@ export function TaskListPage() {
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </div>
         </div>

@@ -52,6 +52,7 @@ export function AuditPage() {
                 ) : entries.length === 0 ? (
                     <div className="empty">No events match.</div>
                 ) : (
+                    <div className="table-wrap">
                     <table className="table">
                         <thead>
                             <tr>
@@ -74,6 +75,7 @@ export function AuditPage() {
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </div>
         </div>

@@ -1,6 +1,6 @@
 """HTTP routers — one file per capability."""
 
-from app.routers import code, embed, evidence, ocr, reason, retrieve, route, verify, vision
+from app.routers import code, embed, evidence, ocr, reason, route, verify, vision
 
 __all__ = [
     "code",
@@ -8,7 +8,6 @@ __all__ = [
     "evidence",
     "ocr",
     "reason",
-    "retrieve",
     "route",
     "verify",
     "vision",

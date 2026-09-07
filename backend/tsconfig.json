@@ -15,7 +15,7 @@
     "isolatedModules": true,
     "verbatimModuleSyntax": false,
     "paths": {
-      "@tolti/contracts": ["../contracts/src/index.ts"]
+      "@tolti/contracts": ["../contracts/dist/index.d.ts"]
     },
     "baseUrl": "."
   },

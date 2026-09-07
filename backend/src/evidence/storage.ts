@@ -2,21 +2,47 @@ import { Client as MinioClient } from 'minio';
 import { env } from '../config.js';
 
 let _client: MinioClient | null = null;
+let _presignClient: MinioClient | null = null;
 
+function splitEndpoint(endpoint: string): { host: string; port: number } {
+    const [host, port] = endpoint.includes(':') ? endpoint.split(':') : [endpoint, '9000'];
+    return { host: host!, port: Number(port) };
+}
+
+/** Client for server-side object operations (internal docker hostname). */
 export function minioClient(): MinioClient {
     if (!_client) {
-        const [host, port] = env.MINIO_ENDPOINT.includes(':')
-            ? env.MINIO_ENDPOINT.split(':')
-            : [env.MINIO_ENDPOINT, '9000'];
+        const { host, port } = splitEndpoint(env.MINIO_ENDPOINT);
         _client = new MinioClient({
-            endPoint: host!,
-            port: Number(port),
+            endPoint: host,
+            port,
             useSSL: env.MINIO_SECURE,
             accessKey: env.MINIO_ROOT_USER,
             secretKey: env.MINIO_ROOT_PASSWORD,
         });
     }
     return _client;
+}
+
+/**
+ * Client used ONLY to sign presigned URLs. Presigned URLs embed the host the
+ * client will connect to, so this must be the BROWSER-reachable endpoint
+ * (e.g. localhost:9000 from the host), not the docker-internal one.
+ */
+function presignClient(): MinioClient {
+    if (!_presignClient) {
+        const publicEndpoint = env.MINIO_PUBLIC_ENDPOINT ?? env.MINIO_ENDPOINT;
+        const { host, port } = splitEndpoint(publicEndpoint);
+        _presignClient = new MinioClient({
+            endPoint: host,
+            port,
+            useSSL: env.MINIO_SECURE,
+            region: 'us-east-1', // set explicitly → SDK signs locally, no network probe
+            accessKey: env.MINIO_ROOT_USER,
+            secretKey: env.MINIO_ROOT_PASSWORD,
+        });
+    }
+    return _presignClient;
 }
 
 export async function ensureBucket(): Promise<void> {
@@ -26,11 +52,11 @@ export async function ensureBucket(): Promise<void> {
 }
 
 export async function presignedPutUrl(key: string, expiresSeconds = 60 * 60): Promise<string> {
-    return minioClient().presignedPutObject(env.MINIO_BUCKET, key, expiresSeconds);
+    return presignClient().presignedPutObject(env.MINIO_BUCKET, key, expiresSeconds);
 }
 
 export async function presignedGetUrl(key: string, expiresSeconds = 60 * 60): Promise<string> {
-    return minioClient().presignedGetObject(env.MINIO_BUCKET, key, expiresSeconds);
+    return presignClient().presignedGetObject(env.MINIO_BUCKET, key, expiresSeconds);
 }
 
 export async function putObject(key: string, body: Buffer, contentType: string): Promise<void> {

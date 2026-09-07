@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from uuid import UUID
-
-from pgvector.sqlalchemy import Vector
 from sqlalchemy import text
 
 from app.logging import get_logger

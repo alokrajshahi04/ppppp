@@ -8,6 +8,8 @@ const EnvSchema = z.object({
     DATABASE_URL: z.string().min(1),
 
     MINIO_ENDPOINT: z.string().min(1),
+    // Host reachable from the BROWSER for presigned URLs (defaults to MINIO_ENDPOINT).
+    MINIO_PUBLIC_ENDPOINT: z.string().optional(),
     MINIO_ROOT_USER: z.string().min(1),
     MINIO_ROOT_PASSWORD: z.string().min(1),
     MINIO_BUCKET: z.string().min(1),

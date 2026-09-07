@@ -12,7 +12,6 @@ from app.routers import (
     evidence,
     ocr,
     reason,
-    retrieve,
     route,
     verify,
     vision,
@@ -63,4 +62,3 @@ app.include_router(code.router, prefix="/v1", tags=["code"])
 app.include_router(route.router, prefix="/v1", tags=["route"])
 app.include_router(verify.router, prefix="/v1", tags=["verify"])
 app.include_router(evidence.router, prefix="/v1", tags=["evidence"])
-app.include_router(retrieve.router, prefix="/v1", tags=["retrieve"])

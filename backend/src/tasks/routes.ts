@@ -66,7 +66,8 @@ const ListTasksQuerySchema = z.object({
 });
 
 const EvidenceUploadSchema = z.object({
-    task_id: z.string().uuid(),
+    // task_id comes from the URL param; kept optional for backwards compat.
+    task_id: z.string().uuid().optional(),
     kind: EvidenceKindEnum,
     filename: z.string().min(1),
     mime_type: z.string().min(1),
@@ -251,31 +252,8 @@ export async function evidenceRoutes(app: any): Promise<void> {
         return { ok: true };
     });
 
-    // Internal endpoint hit by the AI engine after it finishes OCR.
-    // Authenticated with a shared secret via the X-Internal-Token header.
-    app.post('/internal/evidence/:id/ocr', async (req: any, reply: any) => {
-        const token = req.headers['x-internal-token'];
-        if (token !== process.env.AI_ENGINE_SHARED_SECRET) throw forbidden();
-        const { id } = req.params as { id: string };
-        const body = req.body as { text: string };
-        await setEvidenceOcrText(id, body.text);
-        // Trigger indexing in the AI engine (fire-and-forget)
-        const evidence = await getEvidence(id);
-        if (evidence) {
-            const task = await getTask(evidence.task_id);
-            if (task) {
-                indexEvidence({
-                    evidence_id: id,
-                    storage_key: evidence.storage_key,
-                    filename: evidence.filename,
-                    mime_type: evidence.mime_type,
-                    ocr_text: body.text,
-                    kind: evidence.kind,
-                }).catch(() => undefined);
-            }
-        }
-        return reply.send({ ok: true });
-    });
+    // Internal OCR callback lives in src/internal/routes.ts (shared-secret auth,
+    // outside the JWT scope).
 
     // Server-side proxy for evidence uploads when the browser cannot do
     // direct-to-MinIO presigned PUTs (e.g. through the nginx dev proxy).

@@ -89,6 +89,7 @@ export function UsersAdminPage() {
                 {loading ? (
                     <div className="empty"><span className="spinner" /></div>
                 ) : (
+                    <div className="table-wrap">
                     <table className="table">
                         <thead>
                             <tr>
@@ -111,6 +112,7 @@ export function UsersAdminPage() {
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </div>
         </div>

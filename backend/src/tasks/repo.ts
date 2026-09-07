@@ -1,6 +1,13 @@
 import type { Task, TaskStatus, TaskPriority, Evidence, UUID } from '@tolti/contracts';
 import { query } from '../db/pool.js';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Guard: never hand a non-UUID to Postgres (it throws instead of 404-ing). */
+function safeId(id: string | undefined | null): string | null {
+    return id && UUID_RE.test(id) ? id : null;
+}
+
 export interface TaskFilters {
     workspace_id?: UUID;
     status?: TaskStatus;
@@ -22,7 +29,12 @@ export async function listTasks(f: TaskFilters): Promise<{ items: Task[]; total:
     if (f.status) push('t.status = ?::task_status', f.status);
     if (f.priority) push('t.priority = ?::task_priority', f.priority);
     if (f.driver_id) push('t.driver_id = ?', f.driver_id);
-    if (f.q) push('(t.title ILIKE ? OR t.description ILIKE ?)', `%${f.q}%`);
+    if (f.q) {
+        params.push(`%${f.q}%`, `%${f.q}%`);
+        const a = params.length - 1;
+        const b = params.length;
+        where.push(`(t.title ILIKE $${a} OR t.description ILIKE $${b})`);
+    }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     const page = Math.max(1, f.page ?? 1);
@@ -55,9 +67,11 @@ export async function listTasks(f: TaskFilters): Promise<{ items: Task[]; total:
 }
 
 export async function getTask(id: string): Promise<Task | null> {
+    const safe = safeId(id);
+    if (!safe) return null;
     const { rows } = await query<Task>(
         `SELECT * FROM tasks WHERE id = $1`,
-        [id],
+        [safe],
     );
     return rows[0] ?? null;
 }
@@ -120,7 +134,9 @@ export async function listEvidence(taskId: string): Promise<Evidence[]> {
 }
 
 export async function getEvidence(id: string): Promise<Evidence | null> {
-    const { rows } = await query<Evidence>(`SELECT * FROM evidence WHERE id = $1`, [id]);
+    const safe = safeId(id);
+    if (!safe) return null;
+    const { rows } = await query<Evidence>(`SELECT * FROM evidence WHERE id = $1`, [safe]);
     return rows[0] ?? null;
 }
 

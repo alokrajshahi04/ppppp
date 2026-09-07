@@ -75,7 +75,8 @@ export function WorkspacesPage() {
                 <div className="card">
                     <div className="card-title">Members</div>
                     {members.length === 0 ? <div className="muted">No members.</div> : (
-                        <table className="table">
+                        <div className="table-wrap">
+                    <table className="table">
                             <thead>
                                 <tr><th>User</th><th>Email</th><th>Role</th></tr>
                             </thead>
@@ -89,6 +90,7 @@ export function WorkspacesPage() {
                                 ))}
                             </tbody>
                         </table>
+                    </div>
                     )}
                     <div className="divider" />
                     <div className="field">

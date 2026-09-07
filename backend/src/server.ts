@@ -15,6 +15,7 @@ import { messageRoutes } from './messages/routes.js';
 import { aiRoutes } from './ai/routes.js';
 import { approvalRoutes } from './approvals/routes.js';
 import { governanceRoutes } from './governance/routes.js';
+import { internalRoutes } from './internal/routes.js';
 import { websocketRoutes } from './rooms/websocket.js';
 import { pingAi } from './ai/client.js';
 import { pingStorage } from './evidence/storage.js';
@@ -86,16 +87,19 @@ export async function buildServer() {
     });
 
     // ── Routes ─────────────────────────────────────────────
-    await authRoutes(app);
-    await userRoutes(app);
-    await workspaceRoutes(app);
-    await taskRoutes(app);
-    await evidenceRoutes(app);
-    await messageRoutes(app);
-    await aiRoutes(app);
-    await approvalRoutes(app);
-    await governanceRoutes(app);
-    await websocketRoutes(app);
+    // Each group registers inside its own encapsulated scope so its
+    // preHandler hook cannot leak onto sibling routes or /health.
+    await app.register(async (scope) => authRoutes(scope));          // public + per-route auth
+    await app.register(async (scope) => userRoutes(scope));          // JWT group
+    await app.register(async (scope) => workspaceRoutes(scope));     // JWT group
+    await app.register(async (scope) => taskRoutes(scope));          // JWT group
+    await app.register(async (scope) => evidenceRoutes(scope));      // JWT group
+    await app.register(async (scope) => messageRoutes(scope));       // JWT group
+    await app.register(async (scope) => aiRoutes(scope));            // JWT group
+    await app.register(async (scope) => approvalRoutes(scope));      // JWT group
+    await app.register(async (scope) => governanceRoutes(scope));    // JWT group
+    await app.register(async (scope) => internalRoutes(scope));      // shared-secret group
+    await app.register(async (scope) => websocketRoutes(scope));     // query-token group
 
     return app;
 }

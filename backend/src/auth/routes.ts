@@ -143,6 +143,3 @@ async function issueRefreshToken(userId: string, req: any): Promise<string> {
     );
     return token;
 }
-
-// Re-export helpers used by user mgmt routes
-export { createUser, updateUser };

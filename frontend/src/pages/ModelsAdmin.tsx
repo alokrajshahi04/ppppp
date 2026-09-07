@@ -44,6 +44,7 @@ export function ModelsAdminPage() {
             <div className="card">
                 <div className="card-title">Model endpoints</div>
                 {loading ? <div className="empty"><span className="spinner" /></div> : (
+                    <div className="table-wrap">
                     <table className="table">
                         <thead>
                             <tr><th>Capability</th><th>Name</th><th>Model</th><th>Endpoint</th><th>Default</th><th></th></tr>
@@ -64,6 +65,7 @@ export function ModelsAdminPage() {
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </div>
 
@@ -107,6 +109,7 @@ export function ModelsAdminPage() {
             <div className="card" style={{ marginTop: 'var(--s-4)' }}>
                 <div className="card-title">Routing policies</div>
                 {policies.length === 0 ? <div className="muted">No policies.</div> : (
+                    <div className="table-wrap">
                     <table className="table">
                         <thead>
                             <tr><th>Name</th><th>Status</th><th>Rules</th><th></th></tr>
@@ -122,6 +125,7 @@ export function ModelsAdminPage() {
                             ))}
                         </tbody>
                     </table>
+                    </div>
                 )}
             </div>
         </div>

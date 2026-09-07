@@ -11,7 +11,7 @@ VALUES (
     '00000000-0000-0000-0000-000000000001',
     'admin@tolti.ai',
     'Sovereign Admin',
-    '$2b$10$ZbY7eMQQxQH5ZyN4uMwxLuQEDz4YvU7gZP9W5wswzKApQ3vQyJ8S.'
+    '$2a$10$UkDE7OtV18Pg8PlRUMp1RuggZNnbCzERcxgy/WTj4iURPnp1FtEiq'
 ) ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO user_system_roles (user_id, role)
@@ -23,10 +23,10 @@ ON CONFLICT DO NOTHING;
 -- ─────────────────────────────────────────────────────────────
 
 INSERT INTO users (id, email, display_name, password_hash) VALUES
-    ('00000000-0000-0000-0000-000000000002', 'driver@tolti.ai',     'Driver Demo',    '$2b$10$ZbY7eMQQxQH5ZyN4uMwxLuQEDz4YvU7gZP9W5wswzKApQ3vQyJ8S.'),
-    ('00000000-0000-0000-0000-000000000003', 'reviewer@tolti.ai',   'Reviewer Demo',  '$2b$10$ZbY7eMQQxQH5ZyN4uMwxLuQEDz4YvU7gZP9W5wswzKApQ3vQyJ8S.'),
-    ('00000000-0000-0000-0000-000000000004', 'watcher@tolti.ai',    'Watcher Demo',   '$2b$10$ZbY7eMQQxQH5ZyN4uMwxLuQEDz4YvU7gZP9W5wswzKApQ3vQyJ8S.'),
-    ('00000000-0000-0000-0000-000000000005', 'security@tolti.ai',   'Security Demo',  '$2b$10$ZbY7eMQQxQH5ZyN4uMwxLuQEDz4YvU7gZP9W5wswzKApQ3vQyJ8S.')
+    ('00000000-0000-0000-0000-000000000002', 'driver@tolti.ai',     'Driver Demo',    '$2a$10$UkDE7OtV18Pg8PlRUMp1RuggZNnbCzERcxgy/WTj4iURPnp1FtEiq'),
+    ('00000000-0000-0000-0000-000000000003', 'reviewer@tolti.ai',   'Reviewer Demo',  '$2a$10$UkDE7OtV18Pg8PlRUMp1RuggZNnbCzERcxgy/WTj4iURPnp1FtEiq'),
+    ('00000000-0000-0000-0000-000000000004', 'watcher@tolti.ai',    'Watcher Demo',   '$2a$10$UkDE7OtV18Pg8PlRUMp1RuggZNnbCzERcxgy/WTj4iURPnp1FtEiq'),
+    ('00000000-0000-0000-0000-000000000005', 'security@tolti.ai',   'Security Demo',  '$2a$10$UkDE7OtV18Pg8PlRUMp1RuggZNnbCzERcxgy/WTj4iURPnp1FtEiq')
 ON CONFLICT (email) DO NOTHING;
 
 INSERT INTO user_system_roles (user_id, role) VALUES
