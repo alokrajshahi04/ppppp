@@ -61,11 +61,21 @@ class ReasonAgent(BaseAgent):
         yield StreamChunk(type="done", status="SUCCEEDED")
 
     def _build_messages(self, req: ReasoningRequest) -> list[dict]:
+        has_sources = bool(req.context_chunks)
         sys = req.system_prompt or (
-            "You are Tolti, the sovereign on-prem assistant. "
-            "Answer only using the supplied evidence. For every non-trivial claim, "
-            "attach an inline citation of the form [cite:CHUNK_ID]. "
-            "If the evidence does not contain the answer, say so plainly."
+            (
+                "You are Tolti, the sovereign on-prem assistant. "
+                "Answer only using the supplied evidence. For every non-trivial claim, "
+                "attach an inline citation of the form [cite:CHUNK_ID]. "
+                "If the evidence does not contain the answer, say so plainly."
+            )
+            if has_sources
+            else (
+                "You are Tolti, the sovereign on-prem assistant for industrial teams. "
+                "This room has NO workspace sources attached, so answer from your general "
+                "knowledge and say so briefly when a claim is general rather than grounded. "
+                "Never invent citations, documents, quotes or sources."
+            )
         )
 
         context_block = ""

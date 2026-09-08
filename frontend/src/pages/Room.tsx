@@ -161,6 +161,13 @@ export function RoomPage() {
     }, [id]);
 
     const [automations, setAutomations] = useState<AutomationDef[]>([]);
+    const [wsName, setWsName] = useState<string | null>(null);
+    useEffect(() => {
+        if (!task) return;
+        api.get<Array<{ id: string; name: string }>>('/api/v1/workspaces')
+            .then((list) => setWsName(list.find((w) => w.id === task.workspace_id)?.name ?? null))
+            .catch(() => undefined);
+    }, [task]);
     useEffect(() => {
         api.get<AutomationDef[]>('/api/v1/automations').then(setAutomations).catch(() => setAutomations([]));
     }, []);
@@ -179,6 +186,11 @@ export function RoomPage() {
     }
 
     const online = useMemo(() => presence.filter((p) => p.status === 'ONLINE'), [presence]);
+    // Presence can lag on join; the local user is online whenever the socket is.
+    const onlineCount = useMemo(
+        () => online.filter((o) => o.user_id !== user?.id).length + (connected ? 1 : 0),
+        [online, connected, user],
+    );
     const myRoomRole = useMemo(() => members.find((m) => m.user_id === user?.id)?.room_role ?? null, [members, user]);
     const canDecide = useMemo(() =>
         hasRole(user?.system_roles, 'SECURITY_APPROVER')
@@ -215,7 +227,7 @@ export function RoomPage() {
                 <div className="room-head-row">
                     <div>
                         <div className="breadcrumb">
-                            <span>Workspace</span><span>/</span><span className="bc-here">{task.kind === 'PRIVATE' ? 'Private chat' : 'Shared room'}</span>
+                            <span>{wsName ?? 'Workspace'}</span><span>/</span><span className="bc-here">{task.kind === 'PRIVATE' ? 'Private chat' : 'Shared room'}</span>
                         </div>
                         <h1 className="room-title">{task.title}</h1>
                     </div>
@@ -227,7 +239,7 @@ export function RoomPage() {
                         </div>
                         <div className="rel">
                             <button className="btn btn-ghost btn-sm who-label" onClick={() => setPeopleOpen((v) => !v)}>
-                                <IconUsers size={14} /> {members.length} {members.length === 1 ? 'person' : 'people'} · {online.length} online
+                                <IconUsers size={14} /> {members.length} {members.length === 1 ? 'person' : 'people'} · {onlineCount} online
                                 <IconChevronDown size={11} />
                             </button>
                             {peopleOpen && (
@@ -337,6 +349,7 @@ export function RoomPage() {
                                 messages={messages}
                                 runs={runs.filter((r) => r.capability === 'TEXT' || r.capability === 'VISION')}
                                 evidence={evidence}
+                                members={members}
                                 expandedRun={expandedRun}
                                 setExpandedRun={setExpandedRun}
                                 onRetry={(p) => void startRun(p, 'TEXT')}
@@ -397,13 +410,26 @@ export function RoomPage() {
             {/* Driving + composer */}
             <div className="composer-zone">
                 <div className="composer-zone-inner">
+                    {!connected && (
+                        <div className="conn-banner" role="status">
+                            <IconAlert size={13} />
+                            <span><b>Connection lost.</b> Messages may not send until it recovers.</span>
+                            <button className="btn btn-sm" onClick={() => window.location.reload()}>Retry now</button>
+                        </div>
+                    )}
                     <div className="drive-row">
                         <span className="drive-text">
-                            <span className="dot" />
-                            <span><b>{driver.isMe ? 'You' : driver.name}</b> {driver.isMe ? 'are' : 'is'} driving · Shared with the room</span>
+                            <span className={`dot ${connected ? '' : 'dot-off'}`} />
+                            <span>
+                                <b>{driver.isMe ? 'You' : driver.name}</b> {driver.isMe ? 'are' : 'is'} driving · Shared with the room
+                            </span>
                         </span>
                         <span className="drive-spacer" />
-                        <span className="muted" style={{ fontSize: 'var(--fz-tiny)' }}>{connected ? 'live' : 'reconnecting…'}</span>
+                        <span className="muted" style={{ fontSize: 'var(--fz-tiny)' }}>
+                            {connected
+                                ? `${onlineCount} online · live`
+                                : 'reconnecting…'}
+                        </span>
                         {driver.isMe && (
                             <div className="rel">
                                 <button className="btn btn-sm" onClick={() => setHandoffOpen((v) => !v)}>
@@ -545,11 +571,12 @@ function Guidance({ onEvidence, onNote }: { onEvidence: () => void; onNote: () =
 }
 
 function Stream({
-    messages, runs, evidence, expandedRun, setExpandedRun, onRetry, canConfigure,
+    messages, runs, evidence, members, expandedRun, setExpandedRun, onRetry, canConfigure,
 }: {
     messages: Message[];
     runs: AIRun[];
     evidence: Evidence[];
+    members: TaskMember[];
     expandedRun: string | null;
     setExpandedRun: (id: string | null) => void;
     onRetry: (prompt: string) => void;
@@ -562,6 +589,13 @@ function Stream({
     ].sort((a, b) => a.t - b.t);
 
     const evName = (eid: string) => evidence.find((e) => e.id === eid)?.filename ?? 'evidence';
+    // Resolve a sender against the room roster; an unresolvable identity is
+    // labelled explicitly rather than shown as a mystery participant.
+    const senderName = (m: Message) => {
+        if (m.sender?.display_name) return m.sender.display_name;
+        const member = m.sender ? members.find((mm) => mm.user_id === m.sender!.id) : undefined;
+        return member ? member.display_name : 'Guest · unverified';
+    };
 
     return (
         <div className="stream">
@@ -572,7 +606,7 @@ function Stream({
                         <div style={{ minWidth: 0, flex: 1 }}>
                             {it.m.kind !== 'SYSTEM' && (
                                 <div className="msg-head">
-                                    <span className="msg-author">{it.m.sender?.display_name ?? 'Unknown'}</span>
+                                    <span className="msg-author">{senderName(it.m)}</span>
                                     <span className="msg-time">{new Date(it.m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                 </div>
                             )}
@@ -607,6 +641,8 @@ function RunCard({
 }) {
     const [detail, setDetail] = useState<AIRun | null>(null);
     const [showError, setShowError] = useState(false);
+    const [showDetails, setShowDetails] = useState(false);
+    const [copied, setCopied] = useState(false);
     useEffect(() => {
         if (!expanded || detail) return;
         api.get<AIRun>(`/api/v1/ai/runs/${run.id}`).then(setDetail).catch(() => undefined);
@@ -614,19 +650,11 @@ function RunCard({
 
     const failed = run.status === 'FAILED';
     const running = run.status === 'QUEUED' || run.status === 'RUNNING';
+    const citations = detail?.citations ?? [];
+    const sourceNames = [...new Set(citations.map((c) => evidenceName(c.evidence_id)))];
 
     return (
-        <div className="run">
-            <div className="run-head">
-                <IconSpark size={13} style={{ color: failed ? 'var(--danger)' : 'var(--accent)' }} />
-                <span className={`pill ${failed ? 'pill-danger' : running ? 'pill-warn' : run.status === 'SUCCEEDED' ? 'pill-live' : 'pill-muted'}`}>
-                    {running && <span className="spinner" style={{ width: 10, height: 10 }} />}
-                    {run.status.toLowerCase()}
-                </span>
-                <span className="pill pill-muted">{run.capability.toLowerCase()}</span>
-                <span className="run-q">“{run.prompt}”</span>
-            </div>
-
+        <div className={`run ${failed ? 'is-failed' : ''}`}>
             {failed ? (
                 <div className="run-error">
                     <div className="re-title"><IconAlert size={14} /> Run failed</div>
@@ -643,29 +671,57 @@ function RunCard({
             ) : (
                 <>
                     <div className="run-body">
+                        <div className="run-who">
+                            <span className="avatar ai-avatar">T</span>
+                            <span className="run-who-name">Tolti AI</span>
+                            <span className="run-who-meta">local</span>
+                            {running && <span className="pill pill-warn"><span className="spinner" style={{ width: 10, height: 10 }} /> working</span>}
+                        </div>
                         {running ? (
                             <div className="row" style={{ color: 'var(--ink-3)' }}><span className="spinner" /> Working…</div>
                         ) : (
                             <RunAnswer text={run.response ?? ''} />
                         )}
-                        {expanded && detail?.citations && detail.citations.length > 0 && (
-                            <div className="run-cites">
-                                {detail.citations.map((c) => (
-                                    <div className="citation" key={c.id}>
-                                        <span className="cite-src">{evidenceName(c.evidence_id)}{c.confidence != null ? ` · ${(c.confidence * 100).toFixed(0)}%` : ''}</span>
-                                        <blockquote>“{c.quote}”</blockquote>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
                     </div>
                     {!running && (
                         <div className="run-foot">
-                            {run.token_usage?.total_tokens ? <span className="muted mono">{run.token_usage.total_tokens} tokens</span> : <span />}
-                            <span style={{ flex: 1 }} />
-                            {run.status === 'SUCCEEDED' && (
-                                <button className="btn btn-sm btn-ghost" onClick={onToggle}>{expanded ? 'Hide citations' : 'Citations'}</button>
+                            {sourceNames.length > 0 ? (
+                                <span className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+                                    <span className="muted" style={{ fontSize: 'var(--fz-tiny)' }}>Sources:</span>
+                                    {sourceNames.map((n) => <span key={n} className="pill pill-muted">{n}</span>)}
+                                </span>
+                            ) : (
+                                <span className="muted" style={{ fontSize: 'var(--fz-tiny)' }}>
+                                    General knowledge — not grounded in workspace sources
+                                </span>
                             )}
+                            <span style={{ flex: 1 }} />
+                            <button className="btn btn-sm btn-ghost" onClick={() => {
+                                void navigator.clipboard?.writeText(run.response ?? '');
+                                setCopied(true);
+                                window.setTimeout(() => setCopied(false), 1500);
+                            }}>{copied ? 'Copied' : 'Copy'}</button>
+                            {citations.length > 0 && (
+                                <button className="btn btn-sm btn-ghost" onClick={onToggle}>{expanded ? 'Hide sources' : 'Sources'}</button>
+                            )}
+                            <button className="btn btn-sm btn-ghost" onClick={() => setShowDetails((v) => !v)}>Details</button>
+                        </div>
+                    )}
+                    {showDetails && (
+                        <div className="run-details mono">
+                            status {run.status.toLowerCase()} · {run.capability.toLowerCase()} · {run.model_id}
+                            {run.token_usage?.total_tokens ? ` · ${run.token_usage.total_tokens} tokens` : ''}
+                            {run.created_at ? ` · ${new Date(run.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+                        </div>
+                    )}
+                    {expanded && citations.length > 0 && (
+                        <div className="run-cites">
+                            {citations.map((c) => (
+                                <div className="citation" key={c.id}>
+                                    <span className="cite-src">{evidenceName(c.evidence_id)}{c.confidence != null ? ` · ${(c.confidence * 100).toFixed(0)}%` : ''}</span>
+                                    <blockquote>“{c.quote}”</blockquote>
+                                </div>
+                            ))}
                         </div>
                     )}
                 </>
@@ -1056,8 +1112,10 @@ function Composer({
                 ref={ref}
                 rows={1}
                 placeholder={mode === 'ai'
-                    ? 'Ask the AI: it reads this room’s evidence and discussion…'
-                    : 'Write to the room…'}
+                    ? (aiRoute === 'Code specialist'
+                        ? 'Ask Tolti AI to write, review or explain code…'
+                        : 'Ask Tolti AI: it reads this room’s evidence and discussion…')
+                    : 'Message everyone in this room…'}
                 value={text}
                 onChange={(e) => {
                     setText(e.target.value);
@@ -1089,14 +1147,14 @@ function Composer({
                         <IconSend size={11} /> Team
                     </button>
                     <button className={`seg-btn ${mode === 'ai' ? 'is-active' : ''}`} onClick={() => setMode('ai')}>
-                        <IconSpark size={11} /> Ask AI
+                        <IconSpark size={11} /> Ask Tolti AI
                     </button>
                 </div>
                 {mode === 'ai' && (
                     <span className="model-chip"><IconSpark size={11} /> {aiRoute}</span>
                 )}
                 <span className="cb-spacer" />
-                <span className="kbd">⌘↵</span>
+                <span className="kbd" title={mode === 'ai' ? 'Enter sends to the target; Ctrl/⌘+Enter always runs the AI' : 'Enter sends; Shift+Enter adds a new line; Ctrl/⌘+Enter runs the AI'}>⌘↵</span>
                 <button className="btn btn-accent btn-sm" disabled={busy} onClick={() => void submit(mode === 'ai' ? 'run' : 'send')}>
                     {busy ? <span className="spinner" /> : mode === 'ai' ? <IconArrowUp size={12} /> : <IconSend size={12} />}
                     <span className="cb-send-label">{mode === 'ai' ? 'Run AI' : 'Send'}</span>

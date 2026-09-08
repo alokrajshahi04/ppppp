@@ -118,7 +118,7 @@ function RoomSection({
             <div className="rail-label">
                 <span>{label}</span>
                 <span className="row" style={{ gap: 6 }}>
-                    <span>{String(rooms.length).padStart(2, '0')}</span>
+                    <span>{rooms.length}</span>
                     {rooms.length > ROOM_PREVIEW && (
                         <button
                             className="rail-kebab"
@@ -146,7 +146,7 @@ function RoomSection({
                     {r.kind === 'PRIVATE' ? <IconLock size={13} className="ri-lock" /> : <IconChat size={14} />}
                     <span style={{ minWidth: 0 }}>
                         <span className="ri-title" style={{ display: 'block' }}>{r.title}</span>
-                        <span className="ri-meta">{r.message_count ?? 0} messages · {r.status.replace('_', ' ').toLowerCase()}</span>
+                        <span className="ri-meta">{r.message_count ?? 0} {(r.message_count ?? 0) === 1 ? 'message' : 'messages'} · {r.status.replace('_', ' ').toLowerCase()}</span>
                     </span>
                 </button>
             ))}
@@ -291,8 +291,8 @@ export function Shell({ children }: { children: ReactNode }) {
                     </div>
 
                     <div className="rail-section">
-                        {railItem('/files', 'Files', IconFolder)}
-                        {railItem('/outputs', 'Outputs', IconGrid)}
+                        {railItem('/files', 'Workspace files', IconFolder)}
+                        {railItem('/outputs', 'Generated outputs', IconGrid)}
                         {railItem('/activity', 'Room activity', IconPulse)}
                     </div>
 
