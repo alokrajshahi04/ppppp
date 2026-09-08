@@ -19,6 +19,10 @@ class EmailSummaryAutomation(Automation):
     id = "email_summary"
     title = "Email the room summary"
     description = "Compiles what happened in this room and emails it to a teammate or stakeholder."
+    keywords: ClassVar[list[str]] = [
+        "email the summary", "email summary", "email this summary",
+        "send the summary by email", "email the room summary",
+    ]
     params: ClassVar[list[AutomationParam]] = [
         AutomationParam(name="to", label="Send to (email)", required=True, placeholder="name@company.com"),
     ]

@@ -21,7 +21,10 @@ class ExportReportAutomation(Automation):
     id = "export_report"
     title = "Export room report"
     description = "Generates a Markdown report of this room (context, evidence, discussion) and files it under Documents."
-    keywords: ClassVar[list[str]] = ["export", "report", "download summary", "generate report"]
+    keywords: ClassVar[list[str]] = [
+        "export report", "export the report", "export a report",
+        "generate report", "generate a report", "download summary",
+    ]
 
     async def run(self, ctx: AutomationContext, **kwargs: Any) -> dict:
         report = self._compose(ctx)

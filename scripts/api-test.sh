@@ -209,10 +209,17 @@ expect_code "start AI run (202 accepted)" 202 "$R"
 RUN_ID=$(body_of "$R" | jq -r '.id // empty')
 
 if [[ -n "$RUN_ID" ]]; then
-    sleep 3
+    # Real models (Modal, cold Ollama embeds) can take 30-90s to finish;
+    # poll up to 120s for a terminal state instead of one early snapshot.
+    STATUS=""
+    for _ in $(seq 1 24); do
+        sleep 5
+        R=$(req GET "/api/v1/ai/runs/$RUN_ID")
+        STATUS=$(body_of "$R" | jq -r .status)
+        [[ "$STATUS" == "SUCCEEDED" || "$STATUS" == "FAILED" ]] && break
+    done
     R=$(req GET "/api/v1/ai/runs/$RUN_ID")
     expect_code "get AI run" 200 "$R"
-    STATUS=$(body_of "$R" | jq -r .status)
     check "run reached terminal state" "yes" "$( [[ "$STATUS" == "SUCCEEDED" || "$STATUS" == "FAILED" ]] && echo yes || echo no )"
     printf "  ${c_dim}run status: %s (model endpoint not wired yet — FAILED is expected)${c_off}\n" "$STATUS"
 fi

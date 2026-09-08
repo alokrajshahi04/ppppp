@@ -118,6 +118,21 @@ async function main() {
         process.exit(1);
     }
 
+    // Runs left QUEUED/RUNNING by a previous process (restart, crash) can
+    // never complete — their background promise died with it. Fail them so
+    // the UI shows an honest retryable state instead of an eternal spinner.
+    try {
+        const { query } = await import('./db/pool.js');
+        const res = await query(
+            `UPDATE ai_runs SET status = 'FAILED', error = 'Interrupted by a backend restart — retry the run.',
+                 completed_at = NOW()
+             WHERE status IN ('QUEUED', 'RUNNING')`,
+        );
+        if (res.rowCount) app.log.warn(`failed ${res.rowCount} orphaned AI run(s) from before the restart`);
+    } catch (err) {
+        app.log.warn({ err }, 'orphan sweep skipped');
+    }
+
     const shutdown = async (sig: string) => {
         app.log.info(`${sig} received — shutting down`);
         try {

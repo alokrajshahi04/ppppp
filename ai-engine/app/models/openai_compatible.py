@@ -10,9 +10,23 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from app.config import get_settings
 from app.models.base import ModelProvider
+
+
+class _TransientModelError(Exception):
+    """Ollama unloads idle models and briefly 404s/502s during a reload;
+    Modal can 502 mid-cold-start. One short retry clears both."""
+
+
+_RETRY = retry(
+    retry=retry_if_exception_type(_TransientModelError),
+    stop=stop_after_attempt(3),
+    wait=wait_fixed(1.5),
+    reraise=True,
+)
 
 
 class OpenAICompatibleProvider(ModelProvider):
@@ -57,6 +71,7 @@ class OpenAICompatibleProvider(ModelProvider):
             self._clients[capability] = client
         return client
 
+    @_RETRY
     async def chat(
         self,
         *,
@@ -81,6 +96,8 @@ class OpenAICompatibleProvider(ModelProvider):
         payload.update(kwargs)
 
         resp = await client.post("/chat/completions", json=payload)
+        if resp.status_code in (404, 502, 503):
+            raise _TransientModelError(f"{resp.status_code} {resp.text[:120]}")
         resp.raise_for_status()
         data = resp.json()
         choice = data["choices"][0]
@@ -94,12 +111,15 @@ class OpenAICompatibleProvider(ModelProvider):
             "usage": data.get("usage"),
         }
 
+    @_RETRY
     async def embed(self, *, inputs: list[str], model: str | None = None) -> list[list[float]]:
         client = await self._http(None)
         resp = await client.post(
             "/embeddings",
             json={"model": model or self._embedding_model, "input": inputs},
         )
+        if resp.status_code in (404, 502, 503):
+            raise _TransientModelError(f"{resp.status_code} {resp.text[:120]}")
         resp.raise_for_status()
         data = resp.json()
         # OpenAI returns data sorted by index

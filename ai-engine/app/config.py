@@ -2,12 +2,25 @@
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator(
+        "ocr_model", "vision_model", "text_model", "code_model", "embedding_model",
+        "model_code_base_url", "model_text_base_url", "model_vision_base_url",
+        "model_code_api_key", "model_text_api_key", "model_vision_api_key",
+        mode="before",
+    )
+    @classmethod
+    def empty_str_to_default(cls, v, info: ValidationInfo):
+        """An env var set to empty string must not override the field default."""
+        if isinstance(v, str) and not v.strip():
+            return cls.model_fields[info.field_name].default
+        return v
 
     # ── Server ─────────────────────────────────────────────────
     ai_engine_host: str = "0.0.0.0"

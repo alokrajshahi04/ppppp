@@ -19,7 +19,10 @@ class FollowupTaskAutomation(Automation):
     id = "followup_task"
     title = "Create follow-up task"
     description = "Opens a new room that continues from this one — for actions, reviews or handovers."
-    keywords: ClassVar[list[str]] = ["follow up", "followup", "create task", "spin off", "hand over to task"]
+    keywords: ClassVar[list[str]] = [
+        "follow up task", "followup task", "follow-up task",
+        "create a follow", "spin off a task", "create task from this", "hand over to task",
+    ]
     params: ClassVar[list[AutomationParam]] = [
         AutomationParam(name="title", label="Follow-up title", required=False, placeholder="e.g. Review bearing replacement"),
     ]
