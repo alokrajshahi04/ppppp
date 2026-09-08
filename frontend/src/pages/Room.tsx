@@ -692,7 +692,7 @@ function RunCard({
                                 </span>
                             ) : (
                                 <span className="muted" style={{ fontSize: 'var(--fz-tiny)' }}>
-                                    General knowledge — not grounded in workspace sources
+                                    General knowledge, not grounded in workspace sources
                                 </span>
                             )}
                             <span style={{ flex: 1 }} />
