@@ -26,8 +26,9 @@ log = get_logger(__name__)
 
 # A digital page usually extracts more than this; below it we assume scanned.
 MIN_TEXT_CHARS = 40
-# Safety cap so a 900-page scan cannot stall the engine for an hour.
-MAX_PDF_PAGES = 60
+# Safety cap so a huge scan cannot stall the engine for an hour. Digital
+# (text-layer) pages cost ~50ms each; only scanned pages pay for tesseract.
+MAX_PDF_PAGES = 150
 
 
 class OCRAgent(BaseAgent):

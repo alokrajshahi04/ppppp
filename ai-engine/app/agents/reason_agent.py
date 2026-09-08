@@ -34,6 +34,10 @@ class ReasonAgent(BaseAgent):
 
         answer = result["content"]
         citations = extract_citations(answer, req.context_chunks or [])
+        # The UI renders citations as its own list (chunk ids live on the
+        # citation objects), so strip all inline [cite:...] markers — resolved
+        # or not — to keep the answer text clean.
+        answer = re.sub(r"\s*\[cite:[0-9a-fA-F-]{36}\]", "", answer).strip()
 
         usage = result.get("usage") or {}
         return {

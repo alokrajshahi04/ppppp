@@ -411,7 +411,9 @@ export function RoomPage() {
             capability,
             evidence_ids: evidenceIds.length ? evidenceIds : undefined,
         });
-        setRuns((cur) => [run, ...cur]);
+        // The backend broadcasts ai:started over WS BEFORE this 202 response
+        // lands, so dedupe by id — otherwise the run renders as two cards.
+        setRuns((cur) => (cur.some((r) => r.id === run.id) ? cur : [run, ...cur]));
         if (capability === 'CODE') setTab('code');
     }
 
@@ -429,7 +431,8 @@ export function RoomPage() {
         if (!res.ok) throw new Error(`Upload failed (${res.status})`);
         // Direct-to-MinIO uploads bypass the backend — tell it to run OCR + indexing.
         await api.post(`/api/v1/evidence/${pres.evidence.id}/complete`);
-        setEvidence((cur) => [pres.evidence, ...cur]);
+        // Same race as runs: the WS evidence:uploaded event may land first.
+        setEvidence((cur) => (cur.some((e) => e.id === pres.evidence.id) ? cur : [pres.evidence, ...cur]));
     }
 
     async function removeEvidence(ev: Evidence) {
