@@ -6,7 +6,7 @@ import { getTask, getEvidence } from '../tasks/repo.js';
 import { requireTaskAccess } from '../tasks/access.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 import { audit } from '../governance/audit.js';
-import { code, reason, retrieve, route, vision, listAutomations, executeAutomation } from './client.js';
+import { code, reason, retrieve, route, vision, ocr as aiOcr, listAutomations, executeAutomation } from './client.js';
 import {
     completeRun,
     createRun,
@@ -46,15 +46,18 @@ export async function aiRoutes(app: any): Promise<void> {
         const task = await requireTaskAccess(taskId, u);
         const body = parseBody(StartSchema, req.body);
 
-        // Optional: index any newly referenced evidence so RAG has up-to-date chunks.
+        // Optional: index any referenced evidence that was never indexed, so
+        // RAG has up-to-date chunks. Already-indexed evidence is skipped.
         if (body.evidence_ids?.length) {
             for (const evid of body.evidence_ids) {
+                const ev = await getEvidence(evid).catch(() => null);
+                if (!ev || ev.ocr_completed) continue;
                 await indexEvidence({
-                    evidence_id: evid,
-                    storage_key: '',
-                    filename: '',
-                    mime_type: 'application/octet-stream',
-                    kind: 'OTHER',
+                    evidence_id: ev.id,
+                    storage_key: ev.storage_key,
+                    filename: ev.filename,
+                    mime_type: ev.mime_type || 'application/octet-stream',
+                    kind: ev.kind,
                 }).catch(() => undefined);
             }
         }
@@ -235,6 +238,26 @@ async function runAgent(a: RunArgs): Promise<void> {
         } else if (a.capability === 'CODE') {
             const r = await code({ prompt: a.prompt, model_id: a.modelId });
             response = { answer: `\`\`\`${r.language}\n${r.code}\n\`\`\`\n\n${r.explanation}`, citations: [], model: r.model };
+        } else if (a.capability === 'OCR') {
+            // Text extraction runs locally (tesseract/pdfplumber) — no LLM needed.
+            const evid = a.evidenceIds?.[0];
+            if (!evid) throw new Error('OCR run needs at least one evidence_id');
+            const ev = await getEvidence(evid);
+            if (!ev) throw new Error(`evidence ${evid} not found`);
+            const r = await aiOcr({
+                storage_key: ev.storage_key,
+                filename: ev.filename,
+                mime_type: ev.mime_type || 'application/octet-stream',
+            });
+            const text = r.text.trim();
+            const pages = r.pages?.length ?? 0;
+            response = {
+                answer: text
+                    ? `${text}\n\n_Extracted from ${ev.filename} (${pages} page${pages === 1 ? '' : 's'}) via OCR._`
+                    : `No readable text found in ${ev.filename}. If it is a scan, try a higher-resolution image.`,
+                citations: [],
+                model: r.model,
+            };
         } else if (a.capability === 'VISION') {
             const evid = a.evidenceIds?.[0];
             if (!evid) throw new Error('vision run needs at least one evidence_id');
@@ -283,7 +306,7 @@ async function runAgent(a: RunArgs): Promise<void> {
         if (finalRun) {
             broadcastTaskEvent(a.taskId, { type: 'ai:completed', payload: { run: finalRun } });
             audit({
-                actor_id: a.runId, // synthetic — actually no user
+                actor_id: null, // system-initiated completion; the run itself is the target
                 event: 'AI_RUN_COMPLETED',
                 task_id: a.taskId,
                 workspace_id: a.workspaceId,

@@ -15,7 +15,9 @@ class Retriever:
         query_vec = (await provider.embed(inputs=[req.query]))[0]
 
         sql_filter = ""
-        params: dict = {"q": query_vec, "k": top_k}
+        # pgvector's <=> needs an explicit vector: pass a bracket literal and
+        # cast at the call site (a raw float[] has no matching operator).
+        params: dict = {"q": "[" + ",".join(f"{x:.7g}" for x in query_vec) + "]", "k": top_k}
         if req.evidence_ids:
             sql_filter = "WHERE ec.evidence_id = ANY(:eids)"
             params["eids"] = [str(e) for e in req.evidence_ids]
@@ -29,11 +31,11 @@ class Retriever:
                    ec.evidence_id  AS evidence_id,
                    ev.filename     AS filename,
                    ec.content      AS content,
-                   1 - (ec.embedding <=> :q) AS score
+                   1 - (ec.embedding <=> CAST(:q AS vector)) AS score
               FROM evidence_chunks ec
               JOIN evidence ev ON ev.id = ec.evidence_id
               {sql_filter}
-             ORDER BY ec.embedding <=> :q
+             ORDER BY ec.embedding <=> CAST(:q AS vector)
              LIMIT :k
             """
         )

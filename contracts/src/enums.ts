@@ -50,6 +50,7 @@ export type AuditEventKind =
     | 'TASK_ARCHIVED'
     | 'EVIDENCE_UPLOADED'
     | 'EVIDENCE_DELETED'
+    | 'EVIDENCE_REINDEXED'
     | 'AI_RUN_STARTED'
     | 'AI_RUN_COMPLETED'
     | 'AI_RUN_FAILED'

@@ -26,14 +26,14 @@ def chunk_text(text: str) -> list[str]:
             for s in sentences:
                 if buf_len + len(s) > chunk_size and buf:
                     chunks.append(" ".join(buf))
-                    buf = buf[-overlap // max(len(s), 1):] if overlap else []
+                    buf = _carry(buf, overlap)
                     buf_len = sum(len(x) for x in buf)
                 buf.append(s)
                 buf_len += len(s)
         else:
             if buf_len + len(p) > chunk_size and buf:
                 chunks.append(" ".join(buf))
-                buf = buf[-overlap // max(len(p), 1):] if overlap else []
+                buf = _carry(buf, overlap)
                 buf_len = sum(len(x) for x in buf)
             buf.append(p)
             buf_len += len(p)
@@ -41,3 +41,22 @@ def chunk_text(text: str) -> list[str]:
     if buf:
         chunks.append(" ".join(buf))
     return chunks
+
+
+def _carry(buf: list[str], overlap: int) -> list[str]:
+    """Keep the tail of `buf` totalling at most `overlap` characters.
+
+    Note: a slice like buf[-n:] with n=0 returns the WHOLE list, so the old
+    `buf[-overlap // len(s):]` arithmetic silently kept everything. This helper
+    carries an honest tail instead.
+    """
+    if not overlap or not buf:
+        return []
+    kept: list[str] = []
+    total = 0
+    for item in reversed(buf):
+        if total + len(item) > overlap and kept:
+            break
+        kept.insert(0, item)
+        total += len(item)
+    return kept

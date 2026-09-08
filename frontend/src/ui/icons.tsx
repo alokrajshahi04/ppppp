@@ -125,3 +125,7 @@ export const IconHome = (p: P) => (
 export const IconSearch = (p: P) => (
     <Svg {...p}><circle cx="7" cy="7" r="4.2" /><path d="m10.4 10.4 3.1 3.1" /></Svg>
 );
+
+export const IconRefresh = (p: P) => (
+    <Svg {...p}><path d="M13.2 8a5.2 5.2 0 1 1-1.6-3.8" /><path d="M13.5 1.8v2.7h-2.7" /></Svg>
+);

@@ -161,6 +161,8 @@ export async function listEvidence(taskId: string): Promise<Evidence[]> {
     );
     return rows.map((r) => ({
         ...r,
+        // bigint columns come back as strings from pg; the contract says number.
+        byte_size: Number(r.byte_size),
         uploader: { id: r.uploaded_by, display_name: r.uploader_name },
     })) as unknown as Evidence[];
 }
@@ -169,7 +171,10 @@ export async function getEvidence(id: string): Promise<Evidence | null> {
     const safe = safeId(id);
     if (!safe) return null;
     const { rows } = await query<Evidence>(`SELECT * FROM evidence WHERE id = $1`, [safe]);
-    return rows[0] ?? null;
+    const ev = rows[0];
+    if (!ev) return null;
+    // bigint columns come back as strings from pg; the contract says number.
+    return { ...ev, byte_size: Number(ev.byte_size) };
 }
 
 export async function createEvidenceRecord(input: {

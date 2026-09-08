@@ -36,11 +36,39 @@ def extract_citations(answer: str, chunks: list[ContextChunk]) -> list[Citation]
 
 
 def _best_quote(answer: str, pos: int, chunk_content: str, window: int = 200) -> str:
-    """Pick a representative slice of the chunk to attach as the citation quote."""
-    start = max(0, pos - window)
-    end = min(len(answer), pos + window)
-    snippet = answer[start:end].strip()
-    if snippet:
-        return snippet
-    # Fallback: just the first `window` chars of the chunk
-    return chunk_content[:window]
+    """Pick a quote FROM THE SOURCE CHUNK that supports the claim near the marker.
+
+    The claim is approximated by the answer text around the citation marker; the
+    best-matching sentence of the chunk becomes the quote. Falls back to the
+    opening of the chunk so a citation always quotes the document, never the
+    model's own answer.
+    """
+    claim = answer[max(0, pos - window): pos + window].strip()
+    sentence = _best_matching_sentence(chunk_content, claim)
+    if sentence:
+        return sentence
+    head = chunk_content[:window].strip()
+    return head or chunk_content.strip()
+
+
+def _best_matching_sentence(chunk_content: str, claim: str, max_len: int = 240) -> str | None:
+    """Return the chunk sentence sharing the most meaningful words with the claim."""
+    import re as _re
+
+    claim_words = {w for w in _re.findall(r"[a-zA-Z0-9]+", claim.lower()) if len(w) > 2}
+    if not claim_words:
+        return None
+
+    best: tuple[int, str] | None = None
+    for sentence in _re.split(r"(?<=[.!?])\s+|\n+", chunk_content):
+        s = sentence.strip()
+        if len(s) < 12:
+            continue
+        words = {w for w in _re.findall(r"[a-zA-Z0-9]+", s.lower()) if len(w) > 2}
+        overlap = len(words & claim_words)
+        if best is None or overlap > best[0]:
+            best = (overlap, s)
+    if best is None or best[0] == 0:
+        return None
+    quote = best[1]
+    return quote if len(quote) <= max_len else quote[: max_len - 1].rstrip() + "…"

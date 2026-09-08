@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import text
 
+from app.agents.ocr_agent import OCRAgent
 from app.logging import get_logger
 from app.models.providers import get_provider
 from app.rag.chunker import chunk_text
@@ -18,21 +19,16 @@ class Indexer:
     async def index(self, req: IndexEvidenceRequest) -> dict:
         provider = get_provider()
 
-        # Pull text. Prefer pre-computed OCR text; otherwise pull + OCR on the fly.
+        # Pull text. Prefer pre-computed OCR text; otherwise pull + OCR on the fly
+        # via the OCR agent (handles digital PDFs, scans and images).
         text_content = req.ocr_text
         if not text_content:
             try:
                 blob = get_object_bytes(req.storage_key)
-                if req.mime_type.startswith("application/pdf"):
-                    import pdfplumber
-                    from io import BytesIO
-                    with pdfplumber.open(BytesIO(blob)) as pdf:
-                        text_content = "\n\n".join((p.extract_text() or "") for p in pdf.pages)
-                else:
-                    import pytesseract
-                    from PIL import Image
-                    from io import BytesIO
-                    text_content = pytesseract.image_to_string(Image.open(BytesIO(blob)))
+                result = await OCRAgent().run(
+                    blob=blob, filename=req.filename, mime_type=req.mime_type
+                )
+                text_content = result["text"]
             except Exception as exc:
                 log.warning("index.no_text", error=str(exc))
                 text_content = ""

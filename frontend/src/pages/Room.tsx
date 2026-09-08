@@ -7,7 +7,7 @@ import { useTaskSocket, type WSEvent } from '../api/ws';
 import { hasRole, initialsOf, useAuth } from '../store/auth';
 import {
     IconAlert, IconArrowUp, IconChat, IconChevronDown, IconCode, IconDoc, IconDownload,
-    IconPaperclip, IconPlus, IconPulse, IconSend, IconSpark, IconSwap, IconTrash, IconUpload, IconUsers, IconX,
+    IconPaperclip, IconPlus, IconPulse, IconRefresh, IconSend, IconSpark, IconSwap, IconTrash, IconUpload, IconUsers, IconX,
 } from '../ui/icons';
 
 type Tab = 'chat' | 'documents' | 'code' | 'agent';
@@ -297,7 +297,20 @@ export function RoomPage() {
                 )}
                 {tab === 'documents' && (
                     <div className="room-col">
-                        <Documents evidence={evidence} onUpload={(f) => void upload(f)} onDelete={(ev) => void removeEvidence(ev)} />
+                        <Documents
+                            evidence={evidence}
+                            onUpload={(f) => void upload(f)}
+                            onDelete={(ev) => void removeEvidence(ev)}
+                            onReindex={async (ev) => {
+                                await api.post(`/api/v1/evidence/${ev.id}/reindex`);
+                                window.setTimeout(async () => {
+                                    try {
+                                        const fresh = await api.get<Evidence[]>(`/api/v1/tasks/${task!.id}/evidence`);
+                                        setEvidence(fresh);
+                                    } catch { /* keep current list */ }
+                                }, 4000);
+                            }}
+                        />
                     </div>
                 )}
                 {tab === 'code' && (
@@ -632,10 +645,11 @@ function splitFences(text: string): Array<{ fence: boolean; text: string }> {
     return out;
 }
 
-function Documents({ evidence, onUpload, onDelete }: {
+function Documents({ evidence, onUpload, onDelete, onReindex }: {
     evidence: Evidence[];
     onUpload: (f: File) => void;
     onDelete: (e: Evidence) => void;
+    onReindex: (e: Evidence) => Promise<void>;
 }) {
     const { user } = useAuth();
     const [busy, setBusy] = useState(false);
@@ -674,7 +688,7 @@ function Documents({ evidence, onUpload, onDelete }: {
                                     <td className="ellipsis" style={{ maxWidth: 260 }}>{e.filename}</td>
                                     <td><span className="pill pill-muted">{e.kind.toLowerCase()}</span></td>
                                     <td className="muted mono">{(e.byte_size / 1024).toFixed(1)} KB</td>
-                                    <td>{e.ocr_completed ? <span className="pill pill-live">indexed</span> : <span className="pill pill-warn">pending</span>}</td>
+                                    <td>{e.ocr_completed ? <span className="pill pill-live">indexed</span> : <span className="row" style={{ gap: 6 }}><span className="pill pill-warn">pending</span><button className="btn btn-sm btn-ghost" title="Re-run OCR and indexing" onClick={() => void onReindex(e)}><IconRefresh size={12} /></button></span>}</td>
                                     <td className="muted">{e.uploader?.display_name ?? '—'}</td>
                                     <td className="muted mono nowrap">{new Date(e.uploaded_at).toLocaleDateString()}</td>
                                     <td>

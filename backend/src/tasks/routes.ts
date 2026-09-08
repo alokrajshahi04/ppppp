@@ -10,7 +10,6 @@ import {
     handOff,
     listEvidence,
     listTasks,
-    setEvidenceOcrText,
     updateTask,
     type TaskFilters,
 } from './repo.js';
@@ -22,7 +21,7 @@ import { isTaskMember, listTaskMembers, addTaskMember, removeTaskMember } from '
 import { query } from '../db/pool.js';
 import { notify } from '../governance/repo.js';
 import { presignedGetUrl, presignedPutUrl, ensureBucket, deleteObject, putObject } from '../evidence/storage.js';
-import { indexEvidence, ocr as aiOcr } from '../ai/client.js';
+import { runEvidencePipeline } from '../evidence/pipeline.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 import { audit } from '../governance/audit.js';
 import type { UserRole } from '@tolti/contracts';
@@ -350,34 +349,29 @@ export async function evidenceRoutes(app: any): Promise<void> {
         const u = asUser(req);
         const evidence = await getEvidence(id);
         if (!evidence) throw notFound();
-        const task = await requireTaskAccess(evidence.task_id, u);
+        await requireTaskAccess(evidence.task_id, u);
 
-        aiOcr({
-            storage_key: evidence.storage_key,
-            filename: evidence.filename,
-            mime_type: evidence.mime_type,
-        })
-            .then(async (res) => {
-                await setEvidenceOcrText(id, res.text);
-                await indexEvidence({
-                    evidence_id: id,
-                    storage_key: evidence.storage_key,
-                    filename: evidence.filename,
-                    mime_type: evidence.mime_type,
-                    ocr_text: res.text,
-                    kind: evidence.kind,
-                });
-                broadcastTaskEvent(evidence.task_id, {
-                    type: 'activity',
-                    payload: { event: 'evidence_indexed', target_id: id, summary: `Indexed ${evidence.filename}` },
-                });
-            })
-            .catch((e) => {
-                // eslint-disable-next-line no-console
-                console.error('evidence.complete.pipeline failed', e);
-            });
-
+        void runEvidencePipeline(evidence);
         return { ok: true, message: 'OCR + indexing started' };
+    });
+
+    // Re-run OCR + indexing for an evidence item stuck in "pending" (e.g. the
+    // model endpoint or OCR was down when it was first uploaded).
+    app.post('/api/v1/evidence/:id/reindex', async (req: any) => {
+        const { id } = req.params as { id: string };
+        const u = asUser(req);
+        const evidence = await getEvidence(id);
+        if (!evidence) throw notFound();
+        await requireTaskAccess(evidence.task_id, u);
+
+        void runEvidencePipeline(evidence);
+        audit({
+            actor_id: u.sub,
+            event: 'EVIDENCE_REINDEXED',
+            task_id: evidence.task_id,
+            target_id: evidence.id,
+        });
+        return { ok: true, message: 'Re-indexing started' };
     });
 
     // Server-side proxy for evidence uploads when the browser cannot do
@@ -394,23 +388,7 @@ export async function evidenceRoutes(app: any): Promise<void> {
         await putObject(evidence.storage_key, buf, data.mimetype);
 
         // Kick off OCR + indexing.
-        aiOcr({
-            storage_key: evidence.storage_key,
-            filename: evidence.filename,
-            mime_type: evidence.mime_type,
-        })
-            .then(async (res) => {
-                await setEvidenceOcrText(id, res.text);
-                await indexEvidence({
-                    evidence_id: id,
-                    storage_key: evidence.storage_key,
-                    filename: evidence.filename,
-                    mime_type: evidence.mime_type,
-                    ocr_text: res.text,
-                    kind: evidence.kind,
-                });
-            })
-            .catch(() => undefined);
+        void runEvidencePipeline(evidence);
 
         return reply.send({ ok: true });
     });

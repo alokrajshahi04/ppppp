@@ -4,12 +4,17 @@ import { env } from '../config.js';
 
 const BASE = env.AI_ENGINE_URL.replace(/\/$/, '');
 
+// The AI engine allows 600s per call (Modal cold starts are 20-40s); keep a
+// small margin above it so a hung model call can never pin a backend request
+// forever.
+const CALL_TIMEOUT_MS = 615_000;
+
 async function call<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
     const res = await fetch(`${BASE}${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal,
+        signal: signal ?? AbortSignal.timeout(CALL_TIMEOUT_MS),
     });
     if (!res.ok) {
         const detail = await res.text().catch(() => '');
