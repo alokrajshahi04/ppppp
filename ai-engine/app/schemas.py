@@ -103,9 +103,15 @@ class ContextChunk(BaseModel):
     score: float
 
 
+class HistoryTurn(BaseModel):
+    role: str  # 'user' | 'assistant'
+    content: str
+
+
 class ReasoningRequest(BaseModel):
     prompt: str
     system_prompt: str | None = None
+    history: list[HistoryTurn] | None = None
     context_chunks: list[ContextChunk] | None = None
     evidence_summary: str | None = None
     model_id: str | None = None

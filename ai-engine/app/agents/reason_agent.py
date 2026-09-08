@@ -36,8 +36,8 @@ class ReasonAgent(BaseAgent):
         citations = extract_citations(answer, req.context_chunks or [])
         # The UI renders citations as its own list (chunk ids live on the
         # citation objects), so strip all inline [cite:...] markers — resolved
-        # or not — to keep the answer text clean.
-        answer = re.sub(r"\s*\[cite:[0-9a-fA-F-]{36}\]", "", answer).strip()
+        # or hallucinated — to keep the answer text clean.
+        answer = re.sub(r"\s*\[cite:[^\]]{1,80}\]", "", answer).strip()
 
         usage = result.get("usage") or {}
         return {
@@ -78,7 +78,10 @@ class ReasonAgent(BaseAgent):
                 )
 
         user = req.prompt + context_block
-        return [
-            {"role": "system", "content": sys},
-            {"role": "user", "content": user},
-        ]
+        messages: list[dict] = [{"role": "system", "content": sys}]
+        # Recent room conversation — follow-up questions actually follow up.
+        for turn in (req.history or [])[-8:]:
+            if turn.role in ("user", "assistant") and turn.content.strip():
+                messages.append({"role": turn.role, "content": turn.content})
+        messages.append({"role": "user", "content": user})
+        return messages

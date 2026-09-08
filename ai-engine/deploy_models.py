@@ -54,7 +54,10 @@ VL_MODEL_REVISION = os.environ.get("TOLTI_VL_REVISION", "main")
 VLLM_PORT = 8000
 GPU_TYPE = "L40S"
 TENSOR_PARALLEL = 1
-IDLE_TIMEOUT = 30 * 60  # Preserves your setting; idle GPU time can be billed.
+# 60 min: cold starts cost 1.5-2.5 min (vLLM boot + weights), which wrecked the
+# live demo. Doubling the window keeps containers warm through a sparse demo
+# session; scale-to-zero still kicks in afterwards so idle stays near $0.
+IDLE_TIMEOUT = 60 * 60
 SERVER_STARTUP_TIMEOUT = 10 * 60
 
 vllm_image = (

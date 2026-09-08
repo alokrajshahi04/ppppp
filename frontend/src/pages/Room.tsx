@@ -179,6 +179,13 @@ export function RoomPage() {
     }
 
     const online = useMemo(() => presence.filter((p) => p.status === 'ONLINE'), [presence]);
+    const myRoomRole = useMemo(() => members.find((m) => m.user_id === user?.id)?.room_role ?? null, [members, user]);
+    const canDecide = useMemo(() =>
+        hasRole(user?.system_roles, 'SECURITY_APPROVER')
+        || hasRole(user?.system_roles, 'ADMIN')
+        || hasRole(user?.system_roles, 'REVIEWER')
+        || myRoomRole === 'REVIEWER',
+    [user, myRoomRole]);
     const canInvite = useMemo(() => {
         if (!task || !user) return false;
         return task.driver_id === user.id || hasRole(user.system_roles, 'ADMIN');
@@ -224,9 +231,11 @@ export function RoomPage() {
                                 <IconChevronDown size={11} />
                             </button>
                             {peopleOpen && (
-                                <div className="pop" style={{ minWidth: 280 }}>
+                                <div className="pop" style={{ minWidth: 320 }}>
                                     <div className="pop-title">In this room</div>
-                                    {members.map((m) => (
+                                    {members.map((m) => {
+                                        const role = m.is_driver ? 'DRIVER' : (m.room_role ?? 'MEMBER');
+                                        return (
                                         <div className="pop-row" key={m.user_id}>
                                             <span className="row" style={{ gap: 8 }}>
                                                 <span className="avatar" style={{ width: 24, height: 24, fontSize: 9 }}>{initialsOf(m.display_name)}</span>
@@ -238,19 +247,33 @@ export function RoomPage() {
                                                 </span>
                                             </span>
                                             <span className="row" style={{ gap: 6 }}>
+                                                <span className={`pill ${role === 'DRIVER' ? 'pill-accent' : role === 'REVIEWER' ? 'pill-live' : 'pill-muted'}`}>{role.toLowerCase()}</span>
                                                 {online.some((o) => o.user_id === m.user_id) && <span className="pill pill-live">online</span>}
                                                 {canInvite && !m.is_driver && (
-                                                    <button className="btn btn-sm btn-ghost" title="Remove from room"
-                                                        onClick={async () => {
-                                                            await api.del(`/api/v1/tasks/${task.id}/members/${m.user_id}`);
-                                                            await refreshMembers();
-                                                        }}>
-                                                        <IconX size={12} />
-                                                    </button>
+                                                    <>
+                                                        <button
+                                                            className="btn btn-sm btn-ghost"
+                                                            title={role === 'REVIEWER' ? 'Make watcher' : 'Make reviewer'}
+                                                            onClick={async () => {
+                                                                const next = role === 'REVIEWER' ? 'WATCHER' : 'REVIEWER';
+                                                                await api.patch(`/api/v1/tasks/${task.id}/members/${m.user_id}/role`, { role: next });
+                                                                await refreshMembers();
+                                                            }}>
+                                                            <IconSwap size={12} />
+                                                        </button>
+                                                        <button className="btn btn-sm btn-ghost" title="Remove from room"
+                                                            onClick={async () => {
+                                                                await api.del(`/api/v1/tasks/${task.id}/members/${m.user_id}`);
+                                                                await refreshMembers();
+                                                            }}>
+                                                            <IconX size={12} />
+                                                        </button>
+                                                    </>
                                                 )}
                                             </span>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                     {canInvite && (
                                         <>
                                             <div className="pop-sep" />
@@ -356,7 +379,7 @@ export function RoomPage() {
                         <AgentTab
                             runs={runs}
                             approvals={approvals}
-                            canDecide={hasRole(user?.system_roles, 'SECURITY_APPROVER') || hasRole(user?.system_roles, 'ADMIN')}
+                            canDecide={canDecide}
                             registryAutomations={automations}
                             onRunAutomation={(id, params) => runAutomation(id, params)}
                             onRetry={(p) => void startRun(p, 'TEXT')}
@@ -943,7 +966,7 @@ function AgentTab({
                     )}
                     {!canDecide && pending > 0 && (
                         <div className="muted" style={{ fontSize: 'var(--fz-tiny)', marginTop: 'var(--s-2)' }}>
-                            A security approver or administrator decides gated outputs.
+                            A reviewer, security approver or administrator decides gated outputs.
                         </div>
                     )}
                 </section>

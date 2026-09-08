@@ -60,6 +60,7 @@ export interface TaskMember {
     display_name: string;
     email: string;
     is_driver: boolean;
+    room_role?: 'DRIVER' | 'REVIEWER' | 'WATCHER' | 'MEMBER';
     added_at: ISO8601;
 }
 

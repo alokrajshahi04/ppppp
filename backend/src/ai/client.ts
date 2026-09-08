@@ -38,6 +38,7 @@ export const vision = (req: VisionReq) => call<VisionResp>('/v1/vision', req);
 export interface ReasonReq {
     prompt: string;
     system_prompt?: string;
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>;
     context_chunks?: Array<{ content: string; evidence_id: string; chunk_id: string; score: number }>;
     evidence_summary?: string;
     model_id?: string;

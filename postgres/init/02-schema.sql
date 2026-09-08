@@ -206,10 +206,13 @@ CREATE INDEX idx_tasks_status ON tasks(status);
 -- ════════════════════════════════════════════════════════════════
 
 CREATE TABLE task_members (
-    task_id  UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-    user_id  UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    added_by UUID REFERENCES users(id),
-    added_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    task_id   UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    user_id   UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    added_by  UUID REFERENCES users(id),
+    added_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Room-level role on top of workspace roles: DRIVER owns the room,
+    -- REVIEWER reviews/approves AI work, WATCHER observes, MEMBER collaborates.
+    room_role TEXT NOT NULL DEFAULT 'MEMBER',
     PRIMARY KEY (task_id, user_id)
 );
 

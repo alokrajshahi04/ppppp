@@ -65,10 +65,11 @@ class AgentRouter:
                 "confidence": 0.9,
             }
 
-        # 5. Code trigger
+        # 5. Code trigger — specific phrases only; a bare "code" would hijack
+        # ordinary prompts like "what is the code word you told me?".
         if any(
             kw in prompt_l
-            for kw in ("code", "function", "script", "implement", "refactor", "bug", "compile")
+            for kw in ("write code", "code for", "function", "script", "implement", "refactor", "bug", "compile", "python", "javascript", "typescript", "sql query")
         ):
             return {
                 "capability": "CODE",

@@ -17,7 +17,7 @@ import { asUser, badRequest, forbidden, notFound } from '../utils/errors.js';
 import { parseBody, parseQuery } from '../utils/validation.js';
 import { isMember } from '../workspaces/repo.js';
 import { requireTaskAccess } from './access.js';
-import { isTaskMember, listTaskMembers, addTaskMember, removeTaskMember } from './repo.js';
+import { isTaskMember, listTaskMembers, addTaskMember, removeTaskMember, setMemberRoomRole } from './repo.js';
 import { query } from '../db/pool.js';
 import { notify } from '../governance/repo.js';
 import { presignedGetUrl, presignedPutUrl, ensureBucket, deleteObject, putObject } from '../evidence/storage.js';
@@ -172,6 +172,15 @@ export async function taskRoutes(app: any): Promise<void> {
             title: `${u.email} handed “${task.title}” to you`,
             body: 'You are now driving this room.',
         });
+        // Tell the outgoing driver they moved to the watcher seat.
+        await notify({
+            user_id: u.sub,
+            workspace_id: task.workspace_id,
+            task_id: id,
+            kind: 'ROOM_HANDOFF',
+            title: `You handed “${task.title}” to the new driver`,
+            body: 'You are now watching this room and can follow the work live.',
+        });
         audit({
             actor_id: u.sub,
             event: 'TASK_HANDED_OFF',
@@ -249,6 +258,33 @@ export async function taskRoutes(app: any): Promise<void> {
         broadcastTaskEvent(id, {
             type: 'activity',
             payload: { event: 'member_removed', actor_id: u.sub, target_id: userId, summary: 'A member was removed from the room' },
+        });
+        return { ok: true };
+    });
+
+    // Room-level role: promote a member to REVIEWER (can approve / give
+    // feedback on AI work) or demote to WATCHER. Driver or admin only.
+    app.patch('/api/v1/tasks/:id/members/:userId/role', async (req: any) => {
+        const { id, userId } = req.params as { id: string; userId: string };
+        const u = asUser(req);
+        const body = parseBody(z.object({ role: z.enum(['REVIEWER', 'WATCHER', 'MEMBER']) }), req.body);
+        const task = await requireTaskAccess(id, u);
+        if (!(await canManageMembers(task, u))) {
+            throw forbidden('only the room driver or a workspace admin can change roles');
+        }
+        if (userId === task.driver_id) throw badRequest('the driver role follows the handoff, not this endpoint');
+        await setMemberRoomRole(id, userId, body.role);
+        audit({
+            actor_id: u.sub,
+            event: 'MEMBER_UPDATED',
+            task_id: id,
+            workspace_id: task.workspace_id,
+            target_id: userId,
+            payload: { room_role: body.role },
+        });
+        broadcastTaskEvent(id, {
+            type: 'activity',
+            payload: { event: 'member_role_changed', actor_id: u.sub, target_id: userId, summary: `A member is now ${body.role.toLowerCase()}` },
         });
         return { ok: true };
     });

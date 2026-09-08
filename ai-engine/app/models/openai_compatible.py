@@ -84,8 +84,13 @@ class OpenAICompatibleProvider(ModelProvider):
         resp.raise_for_status()
         data = resp.json()
         choice = data["choices"][0]
+        content = choice["message"]["content"] or ""
+        # Some reasoning models (Qwen3) inline their thinking in content even
+        # with enable_thinking=False — keep only the final answer.
+        if "<think>" in content:
+            content = content.split("</think>")[-1].strip()
         return {
-            "content": choice["message"]["content"],
+            "content": content,
             "usage": data.get("usage"),
         }
 

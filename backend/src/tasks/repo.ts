@@ -149,7 +149,39 @@ export async function handOff(taskId: string, fromUserId: string, toUserId: stri
           WHERE id = $1`,
         [taskId, toUserId, fromUserId],
     );
+    // Role transition: the outgoing driver steps down to watcher, the new
+    // driver takes the DRIVER seat. Rows are upserted so this works even if
+    // either user was never an explicit task_member row.
+    await query(
+        `INSERT INTO task_members (task_id, user_id, room_role)
+         VALUES ($1, $2, 'WATCHER')
+         ON CONFLICT (task_id, user_id) DO UPDATE SET room_role = 'WATCHER'`,
+        [taskId, fromUserId],
+    );
+    await query(
+        `INSERT INTO task_members (task_id, user_id, room_role)
+         VALUES ($1, $2, 'DRIVER')
+         ON CONFLICT (task_id, user_id) DO UPDATE SET room_role = 'DRIVER'`,
+        [taskId, toUserId],
+    );
     return getTask(taskId);
+}
+
+export async function setMemberRoomRole(taskId: string, userId: string, role: 'DRIVER' | 'REVIEWER' | 'WATCHER' | 'MEMBER'): Promise<void> {
+    await query(
+        `INSERT INTO task_members (task_id, user_id, room_role)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (task_id, user_id) DO UPDATE SET room_role = $3`,
+        [taskId, userId, role],
+    );
+}
+
+export async function getMemberRoomRole(taskId: string, userId: string): Promise<string | null> {
+    const { rows } = await query<{ room_role: string }>(
+        `SELECT room_role FROM task_members WHERE task_id = $1 AND user_id = $2`,
+        [taskId, userId],
+    );
+    return rows[0]?.room_role ?? null;
 }
 
 export async function listEvidence(taskId: string): Promise<Evidence[]> {
@@ -226,6 +258,7 @@ export interface TaskMemberRow {
     display_name: string;
     email: string;
     is_driver: boolean;
+    room_role: string;
     added_at: string;
 }
 
@@ -240,13 +273,16 @@ export async function isTaskMember(taskId: string, userId: string): Promise<bool
 export async function listTaskMembers(taskId: string): Promise<TaskMemberRow[]> {
     const { rows } = await query<TaskMemberRow>(
         `SELECT u.id AS user_id, u.display_name, u.email, (u.id = t.driver_id) AS is_driver,
+                CASE WHEN u.id = t.driver_id THEN 'DRIVER' ELSE COALESCE(tm.room_role, 'MEMBER') END AS room_role,
                 COALESCE(tm.added_at, t.created_at) AS added_at
            FROM tasks t
            JOIN users u ON u.id = t.driver_id
            LEFT JOIN task_members tm ON tm.task_id = t.id AND tm.user_id = u.id
           WHERE t.id = $1
           UNION
-         SELECT u.id, u.display_name, u.email, FALSE, tm.added_at
+         SELECT u.id, u.display_name, u.email, FALSE,
+                COALESCE(tm.room_role, 'MEMBER'),
+                tm.added_at
            FROM task_members tm
            JOIN users u ON u.id = tm.user_id
            JOIN tasks t ON t.id = tm.task_id

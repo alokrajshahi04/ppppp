@@ -7,7 +7,7 @@ import {
 } from './repo.js';
 import { asUser, forbidden, notFound } from '../utils/errors.js';
 import { parseBody, parseQuery } from '../utils/validation.js';
-import { getTask } from '../tasks/repo.js';
+import { getTask, getMemberRoomRole } from '../tasks/repo.js';
 import { requireTaskAccess } from '../tasks/access.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 import { audit } from '../governance/audit.js';
@@ -79,8 +79,15 @@ export async function approvalRoutes(app: any): Promise<void> {
         if (!approval) throw notFound();
         const task = await requireTaskAccess(approval.task_id, u);
         const roles = u.system_roles as UserRole[];
-        if (!roles.includes('SECURITY_APPROVER') && !roles.includes('ADMIN')) {
-            throw forbidden('security approver or admin only');
+        // Who decides: security approver, workspace admin, workspace reviewer,
+        // or a member holding the room-level REVIEWER role.
+        const roomRole = await getMemberRoomRole(approval.task_id, u.sub);
+        const canDecide = roles.includes('SECURITY_APPROVER')
+            || roles.includes('ADMIN')
+            || roles.includes('REVIEWER')
+            || roomRole === 'REVIEWER';
+        if (!canDecide) {
+            throw forbidden('security approver, reviewer or admin only');
         }
         const decided = await decideApproval(id, u.sub, body.decision, body.reason ?? null);
         audit({

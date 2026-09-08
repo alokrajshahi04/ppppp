@@ -44,6 +44,7 @@ export type AuditEventKind =
     | 'WORKSPACE_UPDATED'
     | 'MEMBER_ADDED'
     | 'MEMBER_REMOVED'
+    | 'MEMBER_UPDATED'
     | 'TASK_CREATED'
     | 'TASK_UPDATED'
     | 'TASK_HANDED_OFF'

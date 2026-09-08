@@ -7,6 +7,7 @@ import { requireTaskAccess } from '../tasks/access.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 import { audit } from '../governance/audit.js';
 import { code, reason, retrieve, route, vision, ocr as aiOcr, listAutomations, executeAutomation } from './client.js';
+import { listMessages } from '../messages/repo.js';
 import {
     completeRun,
     createRun,
@@ -271,8 +272,24 @@ async function runAgent(a: RunArgs): Promise<void> {
             });
             response = { answer: r.description, citations: [], model: r.model };
         } else {
+            // Give the model conversational memory: the last few turns of this
+            // room, so follow-up questions actually follow up.
+            const recent = await listMessages(a.taskId, 10).catch(() => []);
+            const history = recent
+                .filter((m) => m.kind === 'USER' || m.kind === 'AI')
+                .slice(-8)
+                .map((m) => ({
+                    role: (m.kind === 'USER' ? 'user' : 'assistant') as 'user' | 'assistant',
+                    content: m.content.slice(0, 600),
+                }));
+            // The prompt itself is usually already the last chat message;
+            // drop that duplicate so the model doesn't see the question twice.
+            if (history.length && history[history.length - 1].content.trim() === a.prompt.trim()) {
+                history.pop();
+            }
             response = await reason({
                 prompt: a.prompt,
+                history,
                 context_chunks: context_chunks?.map((c) => ({
                     content: c.content,
                     evidence_id: c.evidence_id,
