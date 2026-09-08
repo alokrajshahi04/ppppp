@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createMessage, listMessages } from './repo.js';
 import { asUser, forbidden, notFound } from '../utils/errors.js';
 import { parseBody } from '../utils/validation.js';
-import { getTask } from '../tasks/repo.js';
+import { getTask, getMemberRoomRole } from '../tasks/repo.js';
 import { requireTaskAccess } from '../tasks/access.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 
@@ -33,6 +33,10 @@ export async function messageRoutes(app: any): Promise<void> {
         const { id } = req.params as { id: string };
         const u = asUser(req);
         const task = await requireTaskAccess(id, u);
+        const roomRole = await getMemberRoomRole(id, u.sub);
+        if (roomRole === 'WATCHER') {
+            throw forbidden('watchers can view but not post messages');
+        }
         const body = parseBody(PostSchema, req.body);
         const msg = await createMessage({
             task_id: id,
