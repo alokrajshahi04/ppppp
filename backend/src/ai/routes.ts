@@ -2,7 +2,7 @@ import { z } from 'zod';
 import type { Task } from '@tolti/contracts';
 import { asUser, forbidden, notFound } from '../utils/errors.js';
 import { parseBody } from '../utils/validation.js';
-import { getTask } from '../tasks/repo.js';
+import { getTask, getEvidence } from '../tasks/repo.js';
 import { requireTaskAccess } from '../tasks/access.js';
 import { broadcastTaskEvent } from '../rooms/broadcaster.js';
 import { audit } from '../governance/audit.js';
@@ -238,10 +238,12 @@ async function runAgent(a: RunArgs): Promise<void> {
         } else if (a.capability === 'VISION') {
             const evid = a.evidenceIds?.[0];
             if (!evid) throw new Error('vision run needs at least one evidence_id');
+            const ev = await getEvidence(evid);
+            if (!ev) throw new Error(`evidence ${evid} not found`);
             const r = await vision({
-                storage_key: '',
-                filename: '',
-                mime_type: 'image/png',
+                storage_key: ev.storage_key,
+                filename: ev.filename,
+                mime_type: ev.mime_type || 'image/png',
                 prompt: a.prompt,
             });
             response = { answer: r.description, citations: [], model: r.model };

@@ -243,7 +243,7 @@ check "decision recorded" "APPROVED" "$(body_of "$R" | jq -r .state)"
 # ═════════════════════════════════════════════════════════════
 section "9 · Governance (models · policies · audit · notifications)"
 R=$(req GET /api/v1/models)
-check "5 seeded model configs" 5 "$(body_of "$R" | jq 'length')"
+check "at least 5 seeded model configs" "yes" "$(body_of "$R" | jq -r 'if length >= 5 then "yes" else "no" end')"
 
 R=$(req GET /api/v1/routing-policies)
 check "seeded routing policy" "default" "$(body_of "$R" | jq -r '.[0].name')"

@@ -342,6 +342,44 @@ export async function evidenceRoutes(app: any): Promise<void> {
     // Internal OCR callback lives in src/internal/routes.ts (shared-secret auth,
     // outside the JWT scope).
 
+    // Called by the browser right after a successful presigned PUT so the
+    // OCR + RAG indexing pipeline actually kicks off (multipart path does it
+    // inline; this closes the gap for direct-to-MinIO uploads).
+    app.post('/api/v1/evidence/:id/complete', async (req: any) => {
+        const { id } = req.params as { id: string };
+        const u = asUser(req);
+        const evidence = await getEvidence(id);
+        if (!evidence) throw notFound();
+        const task = await requireTaskAccess(evidence.task_id, u);
+
+        aiOcr({
+            storage_key: evidence.storage_key,
+            filename: evidence.filename,
+            mime_type: evidence.mime_type,
+        })
+            .then(async (res) => {
+                await setEvidenceOcrText(id, res.text);
+                await indexEvidence({
+                    evidence_id: id,
+                    storage_key: evidence.storage_key,
+                    filename: evidence.filename,
+                    mime_type: evidence.mime_type,
+                    ocr_text: res.text,
+                    kind: evidence.kind,
+                });
+                broadcastTaskEvent(evidence.task_id, {
+                    type: 'activity',
+                    payload: { event: 'evidence_indexed', target_id: id, summary: `Indexed ${evidence.filename}` },
+                });
+            })
+            .catch((e) => {
+                // eslint-disable-next-line no-console
+                console.error('evidence.complete.pipeline failed', e);
+            });
+
+        return { ok: true, message: 'OCR + indexing started' };
+    });
+
     // Server-side proxy for evidence uploads when the browser cannot do
     // direct-to-MinIO presigned PUTs (e.g. through the nginx dev proxy).
     app.post('/api/v1/evidence/:id/upload-proxy', async (req: any, reply: any) => {

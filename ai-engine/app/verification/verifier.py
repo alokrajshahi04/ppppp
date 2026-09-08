@@ -37,6 +37,7 @@ class Verifier:
             model_id=settings.text_model,
             messages=messages,
             temperature=0,
+            capability="TEXT",
         )
 
         return _parse(result["content"])

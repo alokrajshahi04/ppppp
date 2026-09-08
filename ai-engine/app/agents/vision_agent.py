@@ -39,6 +39,7 @@ class VisionAgent(BaseAgent):
             model_id=settings.vision_model,
             messages=messages,
             temperature=0,
+            capability=self.capability,
         )
 
         description = result["content"]

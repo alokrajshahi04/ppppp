@@ -37,6 +37,7 @@ class CodeAgent(BaseAgent):
             model_id=req.model_id or settings.code_model,
             messages=messages,
             temperature=0.1,
+            capability=self.capability,
         )
 
         raw = result["content"]

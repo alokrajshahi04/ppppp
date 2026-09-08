@@ -314,12 +314,9 @@ export function RoomPage() {
                         <AgentTab
                             runs={runs}
                             approvals={approvals}
-                            canConfigure={hasRole(user?.system_roles, 'ADMIN')}
                             canDecide={hasRole(user?.system_roles, 'SECURITY_APPROVER') || hasRole(user?.system_roles, 'ADMIN')}
                             automations={automations}
                             onRunAutomation={(id, params) => runAutomation(id, params)}
-                            roomId={task.id}
-                            onRoomChanged={() => window.dispatchEvent(new CustomEvent('tolti:rooms-changed'))}
                             onRetry={(p) => void startRun(p, 'TEXT')}
                             onRequestApproval={async () => {
                                 await api.post('/api/v1/approvals', { task_id: task.id, kind: 'OUTPUT', summary: `Review outputs in “${task.title}”` });
@@ -352,7 +349,7 @@ export function RoomPage() {
                                         <div className="pop-title">Hand this room to</div>
                                         {members.filter((m) => m.user_id !== user?.id).length === 0 ? (
                                             <div className="muted" style={{ padding: '2px 8px', fontSize: 'var(--fz-tiny)' }}>
-                                                Invite teammates first — handoff works within room members.
+                                                Invite teammates first: handoff works within room members.
                                             </div>
                                         ) : members.filter((m) => m.user_id !== user?.id).map((m) => (
                                             <button key={m.user_id} className="pop-row" style={{ width: '100%', border: 0, background: 'transparent', textAlign: 'left', cursor: 'pointer' }}
@@ -373,6 +370,8 @@ export function RoomPage() {
                         )}
                     </div>
                     <Composer
+                        initialMode={tab === 'code' ? 'ai' : 'team'}
+                        aiRoute={tab === 'code' ? 'Code specialist' : 'Auto route'}
                         onSend={async (text) => {
                             await api.post(`/api/v1/tasks/${task.id}/messages`, { content: text });
                         }}
@@ -383,7 +382,7 @@ export function RoomPage() {
                         onAttach={(f) => void upload(f)}
                     />
                     <div className="status-line">
-                        Local inference · {evidence.length === 0 ? 'No sources uploaded' : `${evidence.length} source${evidence.length === 1 ? '' : 's'} uploaded`}
+                        Self-hosted stack · {evidence.length === 0 ? 'no sources uploaded yet' : `${evidence.length} source${evidence.length === 1 ? '' : 's'} indexed for retrieval`}
                     </div>
                 </div>
             </div>
@@ -415,6 +414,8 @@ export function RoomPage() {
         });
         const res = await fetch(pres.upload_url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type || 'application/octet-stream' } });
         if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+        // Direct-to-MinIO uploads bypass the backend — tell it to run OCR + indexing.
+        await api.post(`/api/v1/evidence/${pres.evidence.id}/complete`);
         setEvidence((cur) => [pres.evidence, ...cur]);
     }
 
@@ -537,6 +538,7 @@ function RunCard({
     canConfigure: boolean;
 }) {
     const [detail, setDetail] = useState<AIRun | null>(null);
+    const [showError, setShowError] = useState(false);
     useEffect(() => {
         if (!expanded || detail) return;
         api.get<AIRun>(`/api/v1/ai/runs/${run.id}`).then(setDetail).catch(() => undefined);
@@ -559,16 +561,15 @@ function RunCard({
 
             {failed ? (
                 <div className="run-error">
-                    <div className="re-title"><IconAlert size={14} /> Inference endpoint not reachable</div>
+                    <div className="re-title"><IconAlert size={14} /> Run failed</div>
                     <div className="re-body">
-                        The model endpoint for this capability did not respond, so this run could not produce an answer.
-                        Your message and evidence are safe in the room.
+                        The model endpoint for this capability did not respond. Your message and evidence are safe in the room.
                     </div>
-                    {expanded && run.error && <div className="re-raw">{run.error}</div>}
+                    {showError && run.error && <div className="re-raw">{run.error}</div>}
                     <div className="re-actions">
                         <button className="btn btn-sm" onClick={() => onRetry(run.prompt)}>Retry</button>
                         {canConfigure && <Link className="btn btn-sm" to="/admin/models">Configure model</Link>}
-                        <button className="btn btn-sm btn-ghost" onClick={onToggle}>{expanded ? 'Hide details' : 'Details'}</button>
+                        {run.error && <button className="btn btn-sm btn-ghost" onClick={() => setShowError((v) => !v)}>{showError ? 'Hide details' : 'Details'}</button>}
                     </div>
                 </div>
             ) : (
@@ -705,16 +706,17 @@ function CodeTab({
     onRun: (p: string) => void;
     canConfigure: boolean;
 }) {
-    const [prompt, setPrompt] = useState('');
     const codeRuns = runs.filter((r) => r.capability === 'CODE');
     return (
         <div className="stack" style={{ maxWidth: 860 }}>
             <div>
                 <h2 style={{ fontSize: 'var(--fz-h2)' }}>Code agent</h2>
-                <div className="muted" style={{ fontSize: 'var(--fz-small)' }}>Runs on the code-specialist model. Answers include code blocks and explanations.</div>
+                <div className="muted" style={{ fontSize: 'var(--fz-small)' }}>
+                    Writes, reviews and explains code on the code-specialist model. Type in the composer below: it routes here while this tab is open.
+                </div>
             </div>
             {codeRuns.length === 0 ? (
-                <div className="empty">No code runs yet. Ask the agent to write, review or explain something.</div>
+                <div className="empty">No code runs yet. Ask for an implementation, a review or an explanation.</div>
             ) : (
                 <div className="stack">
                     {[...codeRuns].reverse().map((r) => (
@@ -722,17 +724,12 @@ function CodeTab({
                     ))}
                 </div>
             )}
-            <Composer
-                initialMode="ai"
-                onSend={async () => { /* code tab is AI-only */ }}
-                onReviewRun={async (t) => { onRun(t); setPrompt(''); }}
-                controlledText={[prompt, setPrompt]}
-            />
         </div>
     );
 }
 
 function RunCardSimple({ run, canConfigure, onRetry }: { run: AIRun; canConfigure: boolean; onRetry: (p: string) => void }) {
+    const [showError, setShowError] = useState(false);
     const failed = run.status === 'FAILED';
     const running = run.status === 'QUEUED' || run.status === 'RUNNING';
     return (
@@ -744,12 +741,14 @@ function RunCardSimple({ run, canConfigure, onRetry }: { run: AIRun; canConfigur
             </div>
             {failed ? (
                 <div className="run-error">
-                    <div className="re-title"><IconAlert size={14} /> Inference endpoint not reachable</div>
+                    <div className="re-title"><IconAlert size={14} /> Run failed</div>
+                    <div className="re-body">The code model did not return an answer. Your prompt is safe. Retry it.</div>
                     <div className="re-actions">
                         <button className="btn btn-sm" onClick={() => onRetry(run.prompt)}>Retry</button>
                         {canConfigure && <Link className="btn btn-sm" to="/admin/models">Configure model</Link>}
+                        {run.error && <button className="btn btn-sm btn-ghost" onClick={() => setShowError((v) => !v)}>{showError ? 'Hide details' : 'Details'}</button>}
                     </div>
-                    {run.error && <div className="re-raw">{run.error}</div>}
+                    {showError && run.error && <div className="re-raw">{run.error}</div>}
                 </div>
             ) : (
                 <div className="run-body">
@@ -761,69 +760,59 @@ function RunCardSimple({ run, canConfigure, onRetry }: { run: AIRun; canConfigur
 }
 
 function AgentTab({
-    runs, approvals, canConfigure, canDecide, onRetry, onRequestApproval, onDecide,
-    automations, onRunAutomation, roomId, onRoomChanged,
+    runs, approvals, canDecide, onRetry, onRequestApproval, onDecide,
+    automations, onRunAutomation,
 }: {
     runs: AIRun[];
     approvals: Approval[];
-    canConfigure: boolean;
     canDecide: boolean;
     onRetry: (p: string) => void;
     onRequestApproval: () => Promise<void>;
     onDecide: (id: string, d: 'APPROVED' | 'REJECTED') => Promise<void>;
     automations: AutomationDef[];
     onRunAutomation: (id: string, params?: Record<string, unknown>) => Promise<void>;
-    roomId: string;
-    onRoomChanged: (newRoomId: string) => void;
 }) {
     const [busy, setBusy] = useState(false);
     const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
     const recent = runs.slice(0, 10);
-    return (
-        <div className="stack" style={{ maxWidth: 860 }}>
-            <div className="row-between">
-                <div>
-                    <h2 style={{ fontSize: 'var(--fz-h2)' }}>Agent activity</h2>
-                    <div className="muted" style={{ fontSize: 'var(--fz-small)' }}>Every AI run in this room, with its routing decision and result.</div>
-                </div>
-                <button className="btn" disabled={busy} onClick={async () => { setBusy(true); try { await onRequestApproval(); } finally { setBusy(false); } }}>
-                    Request approval
-                </button>
-            </div>
+    const pending = approvals.filter((a) => a.state === 'PENDING').length;
 
-            <div className="card">
-                <div className="card-title">Automations</div>
+    return (
+        <div className="agent-grid">
+            {/* Left — what the agent can do */}
+            <section className="card">
+                <div className="row-between" style={{ marginBottom: 'var(--s-2)' }}>
+                    <div className="card-title" style={{ marginBottom: 0 }}>Automations</div>
+                    {automations.length > 0 && <span className="pill pill-muted">{automations.length}</span>}
+                </div>
                 <div className="muted" style={{ fontSize: 'var(--fz-small)', marginBottom: 'var(--s-3)' }}>
-                    Agentic actions that do real work on this room. They also trigger from plain chat — e.g. type “export a report” or “email the summary”.
+                    Agentic actions that do real work on this room. They also trigger from plain chat. Try “export a report”.
                 </div>
                 {automations.length === 0 ? (
                     <div className="muted">Automation registry unavailable.</div>
                 ) : (
-                    <div className="stack">
+                    <div className="auto-list">
                         {automations.map((a) => (
-                            <div key={a.id} className="row-between" style={{ borderBottom: '1px solid var(--line)', paddingBottom: 'var(--s-3)', gap: 'var(--s-3)', flexWrap: 'wrap' }}>
-                                <span style={{ minWidth: 220, flex: 1 }}>
-                                    <span style={{ color: 'var(--ink-1)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                                        <IconSpark size={13} /> {a.title}
-                                    </span>
-                                    <span className="muted" style={{ display: 'block', fontSize: 'var(--fz-small)', marginTop: 2 }}>{a.description}</span>
+                            <div className="auto-row" key={a.id}>
+                                <div className="auto-info">
+                                    <div className="auto-title"><IconSpark size={13} /> {a.title}</div>
+                                    <div className="auto-desc">{a.description}</div>
                                     {a.params.length > 0 && (
-                                        <span className="row" style={{ marginTop: 6, gap: 6, flexWrap: 'wrap' }}>
+                                        <div className="auto-params">
                                             {a.params.map((p) => (
                                                 <input
                                                     key={p.name}
                                                     className="input"
-                                                    style={{ maxWidth: 260, padding: '4px 8px', fontSize: 'var(--fz-small)' }}
-                                                    placeholder={`${p.label}${p.required ? ' *' : ''} — ${p.placeholder}`}
+                                                    placeholder={p.required ? `${p.label} (required)` : p.label}
                                                     value={paramDraft[`${a.id}.${p.name}`] ?? ''}
                                                     onChange={(e) => setParamDraft((d) => ({ ...d, [`${a.id}.${p.name}`]: e.target.value }))}
                                                 />
                                             ))}
-                                        </span>
+                                        </div>
                                     )}
-                                </span>
+                                </div>
                                 <button
-                                    className="btn btn-accent btn-sm"
+                                    className="btn btn-accent btn-sm auto-run"
                                     disabled={busy}
                                     onClick={async () => {
                                         const params: Record<string, unknown> = {};
@@ -833,11 +822,7 @@ function AgentTab({
                                         }
                                         setBusy(true);
                                         try {
-                                            const run = await api.post<any>(`/api/v1/automations/${a.id}/execute`, { task_id: roomId, params });
-                                            if (a.id === 'followup_task' && run?.response) {
-                                                // The response summary does not carry the id; the SYSTEM message in chat links it.
-                                                onRoomChanged(roomId);
-                                            }
+                                            await onRunAutomation(a.id, params);
                                         } finally {
                                             setBusy(false);
                                         }
@@ -849,83 +834,90 @@ function AgentTab({
                         ))}
                     </div>
                 )}
-            </div>
+            </section>
 
-            <div className="card">
-                <div className="card-title">Approvals</div>
-                {approvals.length === 0 ? (
-                    <div className="muted">No approvals requested for this room.</div>
-                ) : (
-                    <div className="stack">
-                        {approvals.map((a) => (
-                            <div key={a.id} className="row-between" style={{ borderBottom: '1px solid var(--line)', paddingBottom: 'var(--s-2)' }}>
-                                <span>
-                                    <span className="row" style={{ gap: 8 }}>
-                                        <span className={`pill ${a.state === 'APPROVED' ? 'pill-live' : a.state === 'REJECTED' ? 'pill-danger' : 'pill-warn'}`}>{a.state.toLowerCase()}</span>
-                                        <span style={{ color: 'var(--ink-1)' }}>{a.summary}</span>
-                                    </span>
-                                    <span className="muted" style={{ display: 'block', fontSize: 'var(--fz-tiny)', marginTop: 2 }}>
-                                        {a.kind.toLowerCase().replace('_', ' ')} · by {a.requester?.display_name ?? '—'}{a.decided_at ? ` · decided ${new Date(a.decided_at).toLocaleString()}` : ''}
-                                    </span>
-                                </span>
-                                {a.state === 'PENDING' && canDecide && (
-                                    <span className="row" style={{ gap: 6 }}>
-                                        <button className="btn btn-sm btn-accent" onClick={() => void onDecide(a.id, 'APPROVED')}>Approve</button>
-                                        <button className="btn btn-sm btn-danger" onClick={() => void onDecide(a.id, 'REJECTED')}>Reject</button>
-                                    </span>
-                                )}
-                            </div>
-                        ))}
+            {/* Right — what the agent did and what needs a human */}
+            <div className="agent-col">
+                <section className="card">
+                    <div className="row-between" style={{ marginBottom: 'var(--s-2)' }}>
+                        <div className="card-title" style={{ marginBottom: 0 }}>Approvals</div>
+                        <div className="row" style={{ gap: 8 }}>
+                            {pending > 0 && <span className="pill pill-warn">{pending} pending</span>}
+                            <button className="btn btn-sm" disabled={busy} onClick={async () => { setBusy(true); try { await onRequestApproval(); } finally { setBusy(false); } }}>
+                                Request
+                            </button>
+                        </div>
                     </div>
-                )}
-                {!canDecide && approvals.some((a) => a.state === 'PENDING') && (
-                    <div className="muted" style={{ fontSize: 'var(--fz-tiny)', marginTop: 'var(--s-2)' }}>
-                        A security approver or administrator decides gated outputs.
-                    </div>
-                )}
-            </div>
+                    {approvals.length === 0 ? (
+                        <div className="muted">No approvals requested for this room.</div>
+                    ) : (
+                        <div className="stack">
+                            {approvals.map((a) => (
+                                <div key={a.id} className="approval-row">
+                                    <span className={`pill ${a.state === 'APPROVED' ? 'pill-live' : a.state === 'REJECTED' ? 'pill-danger' : 'pill-warn'}`}>{a.state.toLowerCase()}</span>
+                                    <span className="approval-main">
+                                        <span className="approval-summary">{a.summary}</span>
+                                        <span className="approval-meta">
+                                            {a.kind.toLowerCase().replace('_', ' ')} · by {a.requester?.display_name ?? '—'}{a.decided_at ? ` · decided ${new Date(a.decided_at).toLocaleString()}` : ''}
+                                        </span>
+                                    </span>
+                                    {a.state === 'PENDING' && canDecide && (
+                                        <span className="row" style={{ gap: 6, flex: 'none' }}>
+                                            <button className="btn btn-sm btn-accent" onClick={() => void onDecide(a.id, 'APPROVED')}>Approve</button>
+                                            <button className="btn btn-sm btn-danger" onClick={() => void onDecide(a.id, 'REJECTED')}>Reject</button>
+                                        </span>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {!canDecide && pending > 0 && (
+                        <div className="muted" style={{ fontSize: 'var(--fz-tiny)', marginTop: 'var(--s-2)' }}>
+                            A security approver or administrator decides gated outputs.
+                        </div>
+                    )}
+                </section>
 
-            <div className="card">
-                <div className="card-title">Runs</div>
-                {recent.length === 0 ? (
-                    <div className="muted">No AI runs yet.</div>
-                ) : (
-                    <div className="table-wrap">
-                        <table className="table">
-                            <thead><tr><th>Prompt</th><th>Capability</th><th>Status</th><th>When</th><th /></tr></thead>
-                            <tbody>
-                                {recent.map((r) => (
-                                    <tr key={r.id}>
-                                        <td className="ellipsis" style={{ maxWidth: 280 }}>{r.prompt}</td>
-                                        <td><span className="pill pill-muted">{r.capability.toLowerCase()}</span></td>
-                                        <td>
-                                            <span className={`pill ${r.status === 'FAILED' ? 'pill-danger' : r.status === 'SUCCEEDED' ? 'pill-live' : 'pill-warn'}`}>
-                                                {r.status.toLowerCase()}
-                                            </span>
-                                        </td>
-                                        <td className="muted mono nowrap">{new Date(r.created_at).toLocaleString()}</td>
-                                        <td>{r.status === 'FAILED' && <button className="btn btn-sm btn-ghost" onClick={() => onRetry(r.prompt)}>Retry</button>}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                <section className="card">
+                    <div className="row-between" style={{ marginBottom: 'var(--s-2)' }}>
+                        <div className="card-title" style={{ marginBottom: 0 }}>Recent runs</div>
+                        {runs.length > 0 && <span className="pill pill-muted">{runs.length}</span>}
                     </div>
-                )}
-                {runs.some((r) => r.status === 'FAILED') && (
-                    <div className="muted" style={{ fontSize: 'var(--fz-tiny)', marginTop: 'var(--s-2)' }}>
-                        Failed runs keep their raw error — {canConfigure ? 'open Diagnostics or Models & routing to fix the endpoint.' : 'ask an administrator to check the model endpoint.'}
-                    </div>
-                )}
+                    {recent.length === 0 ? (
+                        <div className="muted">No AI runs yet. Use “Ask AI” in the composer.</div>
+                    ) : (
+                        <div className="runlist">
+                            {recent.map((r) => (
+                                <div className="runlist-row" key={r.id}>
+                                    <span className={`rl-dot rl-${r.status.toLowerCase()}`} />
+                                    <span className="rl-cap">{r.capability.toLowerCase()}</span>
+                                    <span className="rl-prompt" title={r.prompt}>{r.prompt}</span>
+                                    <span className="rl-time">{fmtWhen(r.created_at)}</span>
+                                    {r.status === 'FAILED' && (
+                                        <button className="btn btn-sm btn-ghost" onClick={() => onRetry(r.prompt)}>Retry</button>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </section>
             </div>
         </div>
     );
+}
+
+function fmtWhen(iso: string) {
+    const d = new Date(iso);
+    return d.toDateString() === new Date().toDateString()
+        ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
 // ── Composer ─────────────────────────────────────────────────────
 // One submit action; a segmented toggle decides whether the message goes
 // to the team or to the AI. ⌘↵ always runs the AI regardless of mode.
 function Composer({
-    onSend, onReviewRun, onAttach, controlledText, initialMode = 'team',
+    onSend, onReviewRun, onAttach, controlledText, initialMode = 'team', aiRoute = 'Auto route',
 }: {
     hint?: string;
     onSend: (text: string) => Promise<void>;
@@ -934,17 +926,25 @@ function Composer({
     runLabel?: string;
     controlledText?: [string, (t: string) => void];
     initialMode?: 'team' | 'ai';
+    aiRoute?: string;
 }) {
     const [internal, setInternal] = useState('');
     const [mode, setMode] = useState<'team' | 'ai'>(initialMode);
+    // The composer is mounted once for the whole room; follow the active tab so
+    // the Code tab always targets the code model without a manual toggle.
+    useEffect(() => { setMode(initialMode); }, [initialMode]);
     const text = controlledText ? controlledText[0] : internal;
     const setText = controlledText ? controlledText[1] : setInternal;
     const [busy, setBusy] = useState(false);
     const ref = useRef<HTMLTextAreaElement | null>(null);
+    const inFlight = useRef(false);
 
     async function submit(kind: 'send' | 'run') {
         const t = text.trim();
-        if (!t || busy) return;
+        // inFlight blocks same-tick double calls (e.g. both keydown branches
+        // matching) — setBusy alone is not synchronous between them.
+        if (!t || busy || inFlight.current) return;
+        inFlight.current = true;
         setBusy(true);
         try {
             if (kind === 'run') await onReviewRun(t);
@@ -952,6 +952,7 @@ function Composer({
             setText('');
             ref.current?.focus();
         } finally {
+            inFlight.current = false;
             setBusy(false);
         }
     }
@@ -962,7 +963,7 @@ function Composer({
                 ref={ref}
                 rows={1}
                 placeholder={mode === 'ai'
-                    ? 'Ask the AI — it reads this room’s evidence and discussion…'
+                    ? 'Ask the AI: it reads this room’s evidence and discussion…'
                     : 'Write to the room…'}
                 value={text}
                 onChange={(e) => {
@@ -971,8 +972,12 @@ function Composer({
                     e.target.style.height = `${Math.min(e.target.scrollHeight, 180)}px`;
                 }}
                 onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void submit(mode === 'ai' ? 'run' : 'send'); }
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submit('run'); }
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    // Exclusive branches — Cmd/Ctrl+Enter must not also match
+                    // the plain-Enter branch and fire submit twice.
+                    if (e.metaKey || e.ctrlKey) void submit('run');
+                    else if (!e.shiftKey) void submit(mode === 'ai' ? 'run' : 'send');
                 }}
             />
             <div className="composer-bar">
@@ -994,7 +999,9 @@ function Composer({
                         <IconSpark size={11} /> Ask AI
                     </button>
                 </div>
-                <span className="model-chip"><IconSpark size={11} /> Auto route · evidence attached</span>
+                {mode === 'ai' && (
+                    <span className="model-chip"><IconSpark size={11} /> {aiRoute}</span>
+                )}
                 <span className="cb-spacer" />
                 <span className="kbd">⌘↵</span>
                 <button className="btn btn-accent btn-sm" disabled={busy} onClick={() => void submit(mode === 'ai' ? 'run' : 'send')}>

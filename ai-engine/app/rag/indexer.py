@@ -44,7 +44,14 @@ class Indexer:
         if not chunks:
             return {"evidence_id": str(req.evidence_id), "chunks_indexed": 0, "dimensions": 0}
 
-        vectors = await provider.embed(inputs=chunks)
+        # Embed in batches — CPU embedding servers (Ollama) process sequentially
+        # and a single huge request would blow the client timeout.
+        BATCH = 16
+        vectors: list[list[float]] = []
+        for i in range(0, len(chunks), BATCH):
+            batch = chunks[i : i + BATCH]
+            vectors.extend(await provider.embed(inputs=batch))
+            log.info("index.batch", done=min(i + BATCH, len(chunks)), total=len(chunks))
 
         with session_scope() as s:
             # Wipe any prior chunks for this evidence (re-index is idempotent).

@@ -29,6 +29,7 @@ class ReasonAgent(BaseAgent):
             messages=messages,
             temperature=req.temperature or 0.2,
             max_tokens=req.max_tokens,
+            capability=self.capability,
         )
 
         answer = result["content"]

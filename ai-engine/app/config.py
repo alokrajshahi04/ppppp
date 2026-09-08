@@ -31,11 +31,19 @@ class Settings(BaseSettings):
     model_default_base_url: str = "http://localhost:11434/v1"
     model_default_api_key: str = "ollama"
 
+    # ── Per-capability endpoints (empty → falls back to default) ──
+    model_code_base_url: str = ""
+    model_code_api_key: str = ""
+    model_text_base_url: str = ""
+    model_text_api_key: str = ""
+    model_vision_base_url: str = ""
+    model_vision_api_key: str = ""
+
     # ── Per-capability defaults (used when DB has no row) ─────
-    ocr_model: str = "llama3.2-vision"
-    vision_model: str = "llama3.2-vision"
-    text_model: str = "llama3.1:8b"
-    code_model: str = "qwen2.5-coder:7b"
+    ocr_model: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    vision_model: str = "Qwen/Qwen2.5-VL-7B-Instruct"
+    text_model: str = "Qwen/Qwen3-8B"
+    code_model: str = "Qwen/Qwen2.5-Coder-7B-Instruct"
     embedding_model: str = "nomic-embed-text"
     embedding_dimensions: int = 768
 
@@ -44,8 +52,8 @@ class Settings(BaseSettings):
     chunk_overlap: int = 120
     retrieval_top_k: int = 8
 
-    # ── Timeouts ──────────────────────────────────────────────
-    request_timeout_seconds: float = 120.0
+    # ── Timeouts (Modal cold starts need minutes, not seconds) ──
+    request_timeout_seconds: float = 600.0
 
     # ── SMTP (optional — enables the email automation) ────────
     smtp_host: str = ""
