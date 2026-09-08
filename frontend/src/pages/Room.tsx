@@ -12,6 +12,33 @@ import {
 
 type Tab = 'chat' | 'documents' | 'code' | 'agent';
 
+// Mirror of the AI-engine automation registry. Shown when the registry is
+// unreachable so the Agent tab never renders an empty panel mid-demo; the
+// real registry wins whenever it responds.
+const FALLBACK_AUTOMATIONS: AutomationDef[] = [
+    {
+        id: 'email_summary',
+        title: 'Email the room summary',
+        description: 'Compiles what happened in this room and emails it to a teammate or stakeholder.',
+        keywords: [],
+        params: [{ name: 'to', label: 'Send to (email)', required: true, placeholder: 'name@company.com' }],
+    },
+    {
+        id: 'export_report',
+        title: 'Export room report',
+        description: 'Generates a Markdown report of this room (context, evidence, discussion) and files it under Documents.',
+        keywords: ['export', 'report', 'download summary', 'generate report'],
+        params: [],
+    },
+    {
+        id: 'followup_task',
+        title: 'Create follow-up task',
+        description: 'Opens a new room that continues from this one — for actions, reviews or handovers.',
+        keywords: ['follow up', 'followup', 'create task', 'spin off', 'hand over to task'],
+        params: [{ name: 'title', label: 'Task title', required: true, placeholder: 'e.g. Seal replacement follow-up' }],
+    },
+];
+
 export function RoomPage() {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
@@ -285,7 +312,7 @@ export function RoomPage() {
                         ) : (
                             <Stream
                                 messages={messages}
-                                runs={runs}
+                                runs={runs.filter((r) => r.capability === 'TEXT' || r.capability === 'VISION')}
                                 evidence={evidence}
                                 expandedRun={expandedRun}
                                 setExpandedRun={setExpandedRun}
@@ -299,8 +326,10 @@ export function RoomPage() {
                     <div className="room-col">
                         <Documents
                             evidence={evidence}
+                            runs={runs.filter((r) => r.capability === 'OCR' || r.capability === 'EMBEDDING')}
                             onUpload={(f) => void upload(f)}
                             onDelete={(ev) => void removeEvidence(ev)}
+                            onRetryRun={(r) => void startRun(r.prompt, r.capability as 'OCR' | 'EMBEDDING')}
                             onReindex={async (ev) => {
                                 await api.post(`/api/v1/evidence/${ev.id}/reindex`);
                                 window.setTimeout(async () => {
@@ -328,7 +357,7 @@ export function RoomPage() {
                             runs={runs}
                             approvals={approvals}
                             canDecide={hasRole(user?.system_roles, 'SECURITY_APPROVER') || hasRole(user?.system_roles, 'ADMIN')}
-                            automations={automations}
+                            registryAutomations={automations}
                             onRunAutomation={(id, params) => runAutomation(id, params)}
                             onRetry={(p) => void startRun(p, 'TEXT')}
                             onRequestApproval={async () => {
@@ -403,7 +432,7 @@ export function RoomPage() {
     );
 
     // ── Actions ──────────────────────────────────────────────────
-    async function startRun(prompt: string, capability: 'TEXT' | 'CODE') {
+    async function startRun(prompt: string, capability: 'TEXT' | 'CODE' | 'OCR' | 'VISION' | 'EMBEDDING') {
         const evidenceIds = evidence.map((e) => e.id);
         const run = await api.post<AIRun>(`/api/v1/tasks/${task!.id}/ai/runs`, {
             task_id: task!.id,
@@ -648,11 +677,13 @@ function splitFences(text: string): Array<{ fence: boolean; text: string }> {
     return out;
 }
 
-function Documents({ evidence, onUpload, onDelete, onReindex }: {
+function Documents({ evidence, runs, onUpload, onDelete, onReindex, onRetryRun }: {
     evidence: Evidence[];
+    runs: AIRun[];
     onUpload: (f: File) => void;
     onDelete: (e: Evidence) => void;
     onReindex: (e: Evidence) => Promise<void>;
+    onRetryRun: (r: AIRun) => void;
 }) {
     const { user } = useAuth();
     const [busy, setBusy] = useState(false);
@@ -711,6 +742,27 @@ function Documents({ evidence, onUpload, onDelete, onReindex }: {
                         </tbody>
                     </table>
                 </div>
+            )}
+            {runs.length > 0 && (
+                <section className="card">
+                    <div className="row-between" style={{ marginBottom: 'var(--s-2)' }}>
+                        <div className="card-title" style={{ marginBottom: 0 }}>Document activity</div>
+                        <span className="pill pill-muted">{runs.length}</span>
+                    </div>
+                    <div className="runlist">
+                        {runs.slice(0, 8).map((r) => (
+                            <div className="runlist-row" key={r.id}>
+                                <span className={`rl-dot rl-${r.status.toLowerCase()}`} />
+                                <span className="rl-cap">{r.capability.toLowerCase()}</span>
+                                <span className="rl-prompt" title={r.prompt}>{r.prompt}</span>
+                                <span className="rl-time">{fmtWhen(r.created_at)}</span>
+                                {r.status === 'FAILED' && (
+                                    <button className="btn btn-sm btn-ghost" onClick={() => onRetryRun(r)}>Retry</button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </section>
             )}
         </div>
     );
@@ -778,7 +830,7 @@ function RunCardSimple({ run, canConfigure, onRetry }: { run: AIRun; canConfigur
 
 function AgentTab({
     runs, approvals, canDecide, onRetry, onRequestApproval, onDecide,
-    automations, onRunAutomation,
+    registryAutomations, onRunAutomation,
 }: {
     runs: AIRun[];
     approvals: Approval[];
@@ -786,11 +838,12 @@ function AgentTab({
     onRetry: (p: string) => void;
     onRequestApproval: () => Promise<void>;
     onDecide: (id: string, d: 'APPROVED' | 'REJECTED') => Promise<void>;
-    automations: AutomationDef[];
+    registryAutomations: AutomationDef[];
     onRunAutomation: (id: string, params?: Record<string, unknown>) => Promise<void>;
 }) {
     const [busy, setBusy] = useState(false);
     const [paramDraft, setParamDraft] = useState<Record<string, string>>({});
+    const automations = registryAutomations.length > 0 ? registryAutomations : FALLBACK_AUTOMATIONS;
     const recent = runs.slice(0, 10);
     const pending = approvals.filter((a) => a.state === 'PENDING').length;
 

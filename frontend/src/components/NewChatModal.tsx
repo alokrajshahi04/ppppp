@@ -15,7 +15,12 @@ export function NewChatModal({
     onCreated: (roomId: string) => void;
 }) {
     const [kind, setKind] = useState<'SHARED' | 'PRIVATE'>(mode);
-    const [wsId, setWsId] = useState(workspaces[0]?.id ?? '');
+    // Default to the ACTIVE workspace — the rail is scoped to it, so a room
+    // created anywhere else would not appear in the sidebar.
+    const [wsId, setWsId] = useState(() => {
+        const active = localStorage.getItem('tolti.ws');
+        return active && workspaces.some((w) => w.id === active) ? active : workspaces[0]?.id ?? '';
+    });
     const [title, setTitle] = useState('');
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState<string | null>(null);
